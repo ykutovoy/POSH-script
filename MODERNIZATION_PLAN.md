@@ -1,0 +1,171 @@
+# Script Modernization Plan
+
+## Executive Summary
+
+This document outlines a plan to modernize the PowerShell scripts in this repository, with a focus on:
+1. **Fixing excessive authentication prompts** - Implement separate credential management for vCenter and ESXi host credentials
+2. **Integrating Get-VMhostIpmi and Set-EsxiCustomAttribute functionality** into the helper script
+3. **General code quality improvements** and modernization
+
+**Important Note**: vCenter credentials (for `Connect-VIServer`) are different from ESXi host credentials (for SSH/SCP operations). The modernization plan addresses both separately.
+
+---
+
+## Current State Analysis
+
+### Scripts Overview
+
+1. **RDMA-config-helper_v2.ps1** (Main Helper Script)
+   - Interactive menu-driven ESXi cluster management tool
+   - Functions: SSH management, ESXCLI operations, file transfer, VIB installation, RDMA configuration
+
+2. **get-VMhostIpmi.ps1**
+   - Retrieves BMC (IPMI) IPv4 addresses for ESXi hosts
+   - Well-structured with proper parameter handling and pipeline support
+
+3. **Set-EsxiCustomAttribute.ps1**
+   - Sets custom attributes on ESXi hosts with IP addresses
+   - Supports pipeline input and proper error handling
+
+### Authentication Issues
+
+**IMPORTANT**: There are **two distinct credential types**:
+1. **vCenter Credentials** - Used for `Connect-VIServer` to connect to vCenter/cluster
+2. **ESXi Host Credentials** - Used for SSH, SCP, and direct host operations (typically 'root')
+
+**Problem**: The helper script prompts for credentials in multiple places without proper caching or separation between credential types.
+
+**Root Cause**: 
+- vCenter credentials are not cached at all
+- ESXi host credential functions don't consistently check cache before prompting
+- No separation between the two credential types in the code
+
+---
+
+## Modernization Plan
+
+### Phase 1: Fix Authentication Issues (Priority: HIGH) ✅
+
+#### 1.1 Separate Credential Storage
+- Add separate variables for vCenter and ESXi host credentials
+
+#### 1.2 Centralize Credential Management Functions
+- Create `Get-VCenterCredentials` and `Get-ESXiHostCredentials` functions
+- Both should check cache before prompting
+
+#### 1.3 Update vCenter Connection Function
+- Update `Connect-ToVCenter` to use cached vCenter credentials
+
+#### 1.4 Update ESXi Host Functions
+- Update `Copy-FileToHost`, `Copy-FileToCluster`, `Invoke-SSHOnCluster` to use cached credentials
+
+#### 1.5 Update Menu Display
+- Show status of both credential types in menu
+
+#### 1.6 Update Menu Options
+- Add separate menu options for vCenter and ESXi host credentials
+
+#### 1.7 Create Credential Set Functions
+- Create `Set-VCenterCredentials` and `Set-ESXiHostCredentials` functions
+
+#### 1.8 Add Credential Validation (Optional)
+- Add functions to test credentials before caching
+
+---
+
+### Phase 2: Integrate Get-VMhostIpmi Functionality (Priority: MEDIUM) ✅
+
+#### 2.1 Add Menu Option
+- Add menu item "Get IPMI BMC Addresses"
+
+#### 2.2 Create Helper Function
+- Create `Get-ClusterIPMI` function
+- Query all hosts in cluster for IPMI BMC addresses
+- Display results in formatted table
+
+---
+
+### Phase 3: Integrate Set-EsxiCustomAttribute Functionality (Priority: MEDIUM) ✅
+
+#### 3.1 Add Menu Options
+- Add "Set Custom Attribute on Host"
+- Add "Set Custom Attribute on Cluster (from IPMI)"
+
+#### 3.2 Create Helper Functions
+- `Set-HostCustomAttribute` - Set custom attribute on a single host
+- `Set-ClusterCustomAttributeFromIPMI` - Batch operation using IPMI addresses
+
+---
+
+### Phase 4: General Modernization (Priority: LOW-MEDIUM)
+
+#### 4.1 Code Quality Improvements
+- **Error Handling**: Add try-catch blocks, consistent error logging, `-ErrorAction` parameters
+- **Parameter Validation**: Validate inputs (IP addresses, hostnames, file paths), add confirmation prompts
+- **Output Formatting**: Standardize messages, consistent color coding, progress indicators
+
+#### 4.2 PowerShell Best Practices
+- **Module Structure**: Consider converting to PowerShell module (.psm1), proper exports, help documentation
+- **Parameter Sets**: Use parameter sets for different modes, add `-WhatIf` and `-Confirm` support
+- **Pipeline Support**: Add pipeline support where applicable
+
+#### 4.3 Configuration Management
+- **Persistent Configuration**: Save vCenter/cluster to config file, secure credential caching
+- **Logging**: Optional file logging, timestamps, `-Verbose` support
+
+#### 4.4 User Experience Improvements
+- **Menu Enhancements**: Keyboard shortcuts, "Back" option, show last operation result
+- **Batch Operations**: Progress bars, time estimates, cancellation support
+- **Export/Import**: Export to CSV/JSON, import configuration, execution history
+
+---
+
+## Implementation Priority
+
+### ✅ Completed (Phase 1-3)
+- Phase 1: Authentication Fixes
+- Phase 2: Get-VMhostIpmi Integration
+- Phase 3: Set-EsxiCustomAttribute Integration
+
+### Short-term (Week 2-3)
+- Error handling improvements
+- Output formatting standardization
+- Configuration persistence
+
+### Medium-term (Month 2)
+- Module structure conversion
+- Pipeline support
+- Logging implementation
+
+### Long-term (Month 3+)
+- Advanced UX improvements
+- Batch operation enhancements
+
+---
+
+## Success Criteria
+
+1. ✅ **Authentication**: 
+   - No more than 1 vCenter credential prompt per session (unless explicitly reset)
+   - No more than 1 ESXi host credential prompt per session (unless explicitly reset)
+   - Clear separation between vCenter and ESXi host credentials
+   - Menu clearly displays status of both credential types
+
+2. ✅ **Integration**: Get-VMhostIpmi and Set-EsxiCustomAttribute fully integrated into menu
+
+3. ✅ **Usability**: All new features accessible via menu with clear prompts
+
+4. **Reliability**: All operations have proper error handling
+
+5. **Maintainability**: Code follows PowerShell best practices
+
+---
+
+## Notes
+
+- All changes should maintain the interactive menu-driven approach
+- Consider adding a "non-interactive" mode for automation in future
+- Keep the script self-contained (no external dependencies beyond modules)
+- Test thoroughly with actual vCenter/ESXi environments before deployment
+
+For implementation status and change tracking, see [MODERNIZATION_CHANGELOG.md](MODERNIZATION_CHANGELOG.md).

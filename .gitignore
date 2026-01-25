@@ -1,0 +1,53 @@
+# PowerShell
+*.ps1xml
+*.pssc
+
+# Credentials and Secrets
+*.key
+*.pem
+*.pfx
+*.p12
+*.crt
+*.cer
+*secret*
+*password*
+*.env
+.env
+.env.local
+.env.*.local
+
+# Configuration files with sensitive data
+*config*.json
+*config*.xml
+*credentials*.json
+*credentials*.xml
+*secrets*.json
+*secrets*.xml
+
+# Logs
+*.log
+logs/
+Logs/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*#
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
