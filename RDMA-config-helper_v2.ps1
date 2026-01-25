@@ -17,13 +17,33 @@ function Show-Menu {
     Write-Host ""
     Write-Host "Connection Status: " -NoNewline
     if ($script:connected) {
-        $connType = if ($script:connectionType -eq "Standalone") { "Standalone Host" } else { "vCenter" }
-        Write-Host "Connected to $script:vCenterServer ($connType)" -ForegroundColor Green
+        if ($script:connectionType -eq "Standalone") {
+            Write-Host "Connected to ESXi Host: $script:vCenterServer" -ForegroundColor Green
+        } else {
+            Write-Host "Connected to vCenter: $script:vCenterServer" -ForegroundColor Green
+        }
     } else {
         Write-Host "Not Connected" -ForegroundColor Red
     }
-    Write-Host "Selected Cluster:  " -NoNewline
-    Write-Host "$script:defaultCluster" -ForegroundColor Cyan
+    if ($script:connectionType -eq "Standalone") {
+        # For standalone, show ESXi host info instead of cluster
+        try {
+            $hostObj = Get-VMHost -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -ne $hostObj) {
+                Write-Host "ESXi Host:        " -NoNewline
+                Write-Host "$($hostObj.Name)" -ForegroundColor Cyan
+                Write-Host "ESXi Version:     " -NoNewline
+                Write-Host "$($hostObj.Version)" -ForegroundColor Cyan
+            }
+        } catch {
+            # If we can't get host info, just show the server name
+            Write-Host "ESXi Host:        " -NoNewline
+            Write-Host "$script:vCenterServer" -ForegroundColor Cyan
+        }
+    } else {
+        Write-Host "Selected Cluster:  " -NoNewline
+        Write-Host "$script:defaultCluster" -ForegroundColor Cyan
+    }
     Write-Host "vCenter Credentials: " -NoNewline
     if ($null -ne $script:vCenterCreds) {
         Write-Host "Cached (user: $($script:vCenterCreds.UserName))" -ForegroundColor Green
@@ -43,35 +63,51 @@ function Show-Menu {
     Write-Host "  4. Set/Reset ESXi Host Credentials" -ForegroundColor White
     Write-Host ""
     Write-Host "SSH Management:" -ForegroundColor Yellow
-    Write-Host "  5. Start SSH on cluster hosts" -ForegroundColor White
-    Write-Host "  6. Stop SSH on cluster hosts" -ForegroundColor White
+    if ($script:connectionType -eq "vCenter") {
+        Write-Host "  5. Start SSH on cluster hosts" -ForegroundColor White
+        Write-Host "  6. Stop SSH on cluster hosts" -ForegroundColor White
+    }
     Write-Host ""
     Write-Host "ESXi CLI Operations:" -ForegroundColor Yellow
-    Write-Host "  7. Run ESXCli command on all hosts" -ForegroundColor White
+    if ($script:connectionType -eq "vCenter") {
+        Write-Host "  7. Run ESXCli command on all hosts" -ForegroundColor White
+    }
     Write-Host "  8. Run ESXCli command on single host" -ForegroundColor White
-    Write-Host "  9. Reboot all hosts in cluster" -ForegroundColor White
+    if ($script:connectionType -eq "vCenter") {
+        Write-Host "  9. Reboot all hosts in cluster" -ForegroundColor White
+    }
     Write-Host ""
     Write-Host "File Transfer:" -ForegroundColor Yellow
     Write-Host " 10. SCP file to single host" -ForegroundColor White
-    Write-Host " 11. SCP file to all hosts in cluster" -ForegroundColor White
+    if ($script:connectionType -eq "vCenter") {
+        Write-Host " 11. SCP file to all hosts in cluster" -ForegroundColor White
+    }
     Write-Host ""
     Write-Host "Driver/VIB Management:" -ForegroundColor Yellow
     Write-Host " 12. Install VIB on single host" -ForegroundColor White
-    Write-Host " 13. Install Mellanox driver on cluster" -ForegroundColor White
+    if ($script:connectionType -eq "vCenter") {
+        Write-Host " 13. Install Mellanox driver on cluster" -ForegroundColor White
+    }
     Write-Host ""
     Write-Host "SSH Commands:" -ForegroundColor Yellow
-    Write-Host " 14. Execute SSH command on cluster hosts" -ForegroundColor White
+    if ($script:connectionType -eq "vCenter") {
+        Write-Host " 14. Execute SSH command on cluster hosts" -ForegroundColor White
+    }
     Write-Host " 15. View active SSH sessions" -ForegroundColor White
     Write-Host " 16. Disconnect SSH session" -ForegroundColor White
     Write-Host ""
     Write-Host "RDMA/Network:" -ForegroundColor Yellow
-    Write-Host " 17. Configure RDMA parameters" -ForegroundColor White
-    Write-Host " 18. Check DCBX status" -ForegroundColor White
+    if ($script:connectionType -eq "vCenter") {
+        Write-Host " 17. Configure RDMA parameters" -ForegroundColor White
+        Write-Host " 18. Check DCBX status" -ForegroundColor White
+    }
     Write-Host ""
     Write-Host "IPMI/Custom Attributes:" -ForegroundColor Yellow
     Write-Host " 19. Get IPMI BMC Addresses" -ForegroundColor White
-    Write-Host " 20. Set Custom Attribute on Host" -ForegroundColor White
-    Write-Host " 21. Set Custom Attribute on Cluster (from IPMI)" -ForegroundColor White
+    if ($script:connectionType -eq "vCenter") {
+        Write-Host " 20. Set Custom Attribute on Host" -ForegroundColor White
+        Write-Host " 21. Set Custom Attribute on Cluster (from IPMI)" -ForegroundColor White
+    }
     Write-Host ""
     Write-Host "  0. Exit" -ForegroundColor Red
     Write-Host ""
@@ -114,6 +150,17 @@ function Get-ESXiHostCredentials {
         return $script:hostCreds
     }
     
+    # If vCenter credentials are available, offer to use them for ESXi host operations
+    if ($null -ne $script:vCenterCreds) {
+        Write-Host "vCenter credentials are available (user: $($script:vCenterCreds.UserName))" -ForegroundColor Cyan
+        $useVCreds = Read-Host "Use vCenter credentials for ESXi host? (Y/N) [default: N]"
+        if ($useVCreds -eq "Y" -or $useVCreds -eq "y") {
+            $script:hostCreds = $script:vCenterCreds
+            Write-Host "Using vCenter credentials for ESXi host operations." -ForegroundColor Green
+            return $script:hostCreds
+        }
+    }
+    
     $script:hostCreds = Get-Credential -Message "Enter ESXi host credentials (typically 'root')"
     return $script:hostCreds
 }
@@ -150,6 +197,18 @@ function Set-ESXiHostCredentials {
         $reset = Read-Host "Reset credentials? (Y/N)"
         if ($reset -ne "Y" -and $reset -ne "y") {
             Write-Host "Keeping existing credentials." -ForegroundColor Green
+            Pause
+            return
+        }
+    }
+    
+    # If vCenter credentials are available, offer to use them
+    if ($null -ne $script:vCenterCreds) {
+        Write-Host "vCenter credentials are available (user: $($script:vCenterCreds.UserName))" -ForegroundColor Cyan
+        $useVCreds = Read-Host "Use vCenter credentials for ESXi host? (Y/N) [default: N]"
+        if ($useVCreds -eq "Y" -or $useVCreds -eq "y") {
+            $script:hostCreds = $script:vCenterCreds
+            Write-Host "✓ Using vCenter credentials for ESXi host operations." -ForegroundColor Green
             Pause
             return
         }
@@ -734,23 +793,100 @@ do {
         "2" { Disconnect-FromVCenter }
         "3" { Set-VCenterCredentials }
         "4" { Set-ESXiHostCredentials }
-        "5" { Start-ClusterSSH }
-        "6" { Stop-ClusterSSH }
-        "7" { Invoke-ESXCliOnCluster }
+        "5" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Start-ClusterSSH 
+            }
+        }
+        "6" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Stop-ClusterSSH 
+            }
+        }
+        "7" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Invoke-ESXCliOnCluster 
+            }
+        }
         "8" { Invoke-ESXCliOnHost }
-        "9" { Restart-ClusterHosts }
+        "9" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Restart-ClusterHosts 
+            }
+        }
         "10" { Copy-FileToHost }
-        "11" { Copy-FileToCluster }
+        "11" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Copy-FileToCluster 
+            }
+        }
         "12" { Install-VIBOnHost }
-        "13" { Install-MellanoxDriver }
-        "14" { Invoke-SSHOnCluster }
+        "13" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Install-MellanoxDriver 
+            }
+        }
+        "14" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Invoke-SSHOnCluster 
+            }
+        }
         "15" { Show-SSHSessions }
         "16" { Remove-SSHSessionById }
-        "17" { Set-RDMAParameters }
-        "18" { Get-DCBXStatus }
+        "17" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Set-RDMAParameters 
+            }
+        }
+        "18" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Get-DCBXStatus 
+            }
+        }
         "19" { Get-ClusterIPMI }
-        "20" { Set-HostCustomAttribute }
-        "21" { Set-ClusterCustomAttributeFromIPMI }
+        "20" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Set-HostCustomAttribute 
+            }
+        }
+        "21" { 
+            if ($script:connectionType -ne "vCenter") {
+                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
+                Pause
+            } else {
+                Set-ClusterCustomAttributeFromIPMI 
+            }
+        }
         "0" { 
             if ($script:connected) {
                 Disconnect-FromVCenter
