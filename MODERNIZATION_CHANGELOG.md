@@ -1,6 +1,6 @@
 # Modernization Changelog
 
-**Last Updated**: January 25, 2026
+**Last Updated**: January 25, 2026 (Updated with Phase 4: Standalone Host Support)
 
 This document tracks the implementation status and changes made during the script modernization process.
 
@@ -8,7 +8,7 @@ This document tracks the implementation status and changes made during the scrip
 
 ## Implementation Status
 
-### ✅ Completed (Phase 1-3)
+### ✅ Completed (Phase 1-4)
 
 #### Phase 1: Authentication Fixes - COMPLETED
 - ✅ Separate credential storage for vCenter and ESXi host credentials
@@ -31,7 +31,17 @@ This document tracks the implementation status and changes made during the scrip
 - ✅ Implemented `Set-HostCustomAttribute` function for single host operations
 - ✅ Implemented `Set-ClusterCustomAttributeFromIPMI` function for batch operations using IPMI addresses
 
-### 🔄 Pending (Phase 4)
+#### Phase 4: Standalone Host Support - COMPLETED
+- ✅ Added connection type detection to distinguish between vCenter and standalone ESXi host connections
+- ✅ Added `$script:connectionType` variable to track connection type ("vCenter" or "Standalone")
+- ✅ Implemented `Test-IsVCenter` function to detect connection type
+- ✅ Updated `Connect-ToVCenter` to detect and store connection type after connection
+- ✅ Updated menu display to show connection type (vCenter/Standalone Host) in status
+- ✅ Updated `Get-ClusterIPMI` (Option 19) to work with both vCenter clusters and standalone hosts
+- ✅ Updated `Get-ClusterName` to prevent cluster operations when connected to standalone hosts
+- ✅ Added appropriate error messages for standalone host scenarios
+
+### 🔄 Pending (Phase 5)
 - Error handling improvements
 - Output formatting standardization
 - Configuration persistence
@@ -107,6 +117,27 @@ This document tracks the implementation status and changes made during the scrip
 - Uses `Set-Annotation` with `-Confirm:$false` for non-interactive operation
 - Provides clear success/error feedback with color coding
 
+### Phase 4 Implementation Details
+
+**Connection Type Detection:**
+- Added `$script:connectionType` variable to track connection type
+- Implemented `Test-IsVCenter` function that checks for clusters to determine connection type
+- Connection type is detected automatically after successful connection
+
+**Updated Functions:**
+- `Connect-ToVCenter` - Now detects connection type (vCenter or Standalone) after connection and stores it
+- `Disconnect-FromVCenter` - Now resets connection type on disconnect
+- `Show-Menu` - Displays connection type in status line (e.g., "Connected to host.example.com (Standalone Host)")
+- `Get-ClusterName` - Now checks if connected to standalone host and returns error if cluster operation attempted
+- `Get-ClusterIPMI` - Now handles both scenarios:
+  - **Standalone Host**: Retrieves IPMI for the single connected host (no cluster prompt)
+  - **vCenter**: Uses existing cluster-based logic (prompts for cluster name)
+
+**Implementation Notes:**
+- When connected to standalone host, Option 19 (Get IPMI BMC Addresses) works without requiring cluster name
+- Cluster-based operations now show clear error messages when attempted on standalone hosts
+- Connection type is displayed in menu for user awareness
+
 ---
 
 ## Testing Notes
@@ -128,9 +159,24 @@ This document tracks the implementation status and changes made during the scrip
 - ✅ Verified custom attribute creation when it doesn't exist
 - ✅ Verified confirmation prompt prevents accidental execution
 
+### Phase 4 Testing
+- ✅ Verified connection type detection works correctly for vCenter connections
+- ✅ Verified connection type detection works correctly for standalone host connections
+- ✅ Verified Option 19 (Get IPMI BMC Addresses) works with standalone hosts
+- ✅ Verified Option 19 still works with vCenter clusters
+- ✅ Verified menu displays connection type correctly
+- ✅ Verified cluster operations show appropriate errors on standalone hosts
+
 ---
 
 ## Known Issues
+
+### Resolved Issues
+- ✅ **Issue**: Option 19 (Get IPMI BMC Addresses) failed with "no cluster specified" when connected to standalone host
+  - **Resolution**: Added connection type detection and updated `Get-ClusterIPMI` to handle standalone hosts
+  - **Date**: January 25, 2026
+
+### Current Issues
 
 None at this time.
 
@@ -138,4 +184,9 @@ None at this time.
 
 ## Future Enhancements
 
-See [MODERNIZATION_PLAN.md](MODERNIZATION_PLAN.md) for Phase 4 details and future improvements.
+See [MODERNIZATION_PLAN.md](MODERNIZATION_PLAN.md) for Phase 5 details and future improvements.
+
+**Potential Enhancements:**
+- Extend standalone host support to other cluster-based functions (e.g., SSH management, RDMA configuration)
+- Add option to switch between vCenter and standalone host connections without disconnecting
+- Improve error messages to suggest alternative options based on connection type

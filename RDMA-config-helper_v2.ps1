@@ -7,6 +7,7 @@ $script:defaultCluster = ""  # e.g., "Production-Cluster-01"
 $script:vCenterCreds = $null      # vCenter/cluster credentials
 $script:hostCreds = $null         # ESXi host/SSH credentials
 $script:connected = $false
+$script:connectionType = $null    # "vCenter" or "Standalone"
 
 function Show-Menu {
     Clear-Host
@@ -16,7 +17,8 @@ function Show-Menu {
     Write-Host ""
     Write-Host "Connection Status: " -NoNewline
     if ($script:connected) {
-        Write-Host "Connected to $script:vCenterServer" -ForegroundColor Green
+        $connType = if ($script:connectionType -eq "Standalone") { "Standalone Host" } else { "vCenter" }
+        Write-Host "Connected to $script:vCenterServer ($connType)" -ForegroundColor Green
     } else {
         Write-Host "Not Connected" -ForegroundColor Red
     }
@@ -166,7 +168,29 @@ function Set-ESXiHostCredentials {
     Pause
 }
 
+function Test-IsVCenter {
+    # Check if connected to vCenter or standalone host
+    if (-not $script:connected) {
+        return $false
+    }
+    
+    try {
+        # Try to get clusters - if we can get clusters, it's vCenter
+        $clusters = Get-Cluster -ErrorAction SilentlyContinue
+        return ($null -ne $clusters -and $clusters.Count -gt 0)
+    } catch {
+        # If Get-Cluster fails or returns nothing, it's likely a standalone host
+        return $false
+    }
+}
+
 function Get-ClusterName {
+    # Check if we're connected to a standalone host
+    if ($script:connectionType -eq "Standalone") {
+        Write-Error "This operation requires a cluster, but you are connected to a standalone host."
+        return $null
+    }
+    
     $defaultPrompt = if ([string]::IsNullOrWhiteSpace($script:defaultCluster)) { 
         "Enter cluster name" 
     } else { 
@@ -200,10 +224,19 @@ function Connect-ToVCenter {
         Connect-VIServer $vCenter -Credential $vCenterCreds -Force -ErrorAction Stop
         $script:vCenterServer = $vCenter
         $script:connected = $true
-        Write-Host "Successfully connected!" -ForegroundColor Green
+        
+        # Detect connection type
+        if (Test-IsVCenter) {
+            $script:connectionType = "vCenter"
+            Write-Host "Successfully connected to vCenter!" -ForegroundColor Green
+        } else {
+            $script:connectionType = "Standalone"
+            Write-Host "Successfully connected to standalone ESXi host!" -ForegroundColor Green
+        }
     } catch { 
         Write-Host "Failed to connect: $_" -ForegroundColor Red
         $script:connected = $false
+        $script:connectionType = $null
     }
     Pause
 }
@@ -212,6 +245,7 @@ function Disconnect-FromVCenter {
     try {
         Disconnect-VIServer $script:vCenterServer -Confirm:$false -ErrorAction Stop
         $script:connected = $false
+        $script:connectionType = $null
         Write-Host "Disconnected successfully!" -ForegroundColor Green
     } catch {
         Write-Host "Failed to disconnect: $_" -ForegroundColor Red
@@ -532,25 +566,62 @@ function Get-DCBXStatus {
 }
 
 function Get-ClusterIPMI {
-    $cluster = Get-ClusterName
-    Write-Host "Retrieving IPMI BMC addresses for cluster: $cluster" -ForegroundColor Yellow
-    
-    $results = Get-VMHost -Location $cluster | ForEach-Object {
+    # Check connection type and handle accordingly
+    if ($script:connectionType -eq "Standalone") {
+        # Connected to standalone host - get IPMI for this host only
+        Write-Host "Retrieving IPMI BMC address for standalone host: $script:vCenterServer" -ForegroundColor Yellow
+        
         try {
-            $esxcli = Get-EsxCli -v2 -VMHost $_.Name
+            # Get the connected host (when connected to standalone, there's only one)
+            $hostObj = Get-VMHost -ErrorAction Stop | Select-Object -First 1
+            if ($null -eq $hostObj) {
+                # Fallback: try using the server name
+                $hostObj = Get-VMHost -Name $script:vCenterServer -ErrorAction Stop
+            }
+            
+            $esxcli = Get-EsxCli -v2 -VMHost $hostObj
             $bmcInfo = $esxcli.hardware.ipmi.bmc.get.Invoke()
             $ipv4 = if ($bmcInfo.IPv4Address) { $bmcInfo.IPv4Address } 
                    elseif ($bmcInfo.IP) { $bmcInfo.IP } 
                    else { "N/A" }
             
-            [pscustomobject]@{
-                HostName    = $_.Name
+            $results = [pscustomobject]@{
+                HostName    = $hostObj.Name
                 IPv4Address = $ipv4
             }
         } catch {
-            [pscustomobject]@{
-                HostName    = $_.Name
+            $results = [pscustomobject]@{
+                HostName    = $script:vCenterServer
                 IPv4Address = "Error: $_"
+            }
+        }
+    } else {
+        # Connected to vCenter - get IPMI for cluster hosts
+        $cluster = Get-ClusterName
+        if ($null -eq $cluster) {
+            Pause
+            return
+        }
+        
+        Write-Host "Retrieving IPMI BMC addresses for cluster: $cluster" -ForegroundColor Yellow
+        
+        $results = Get-VMHost -Location $cluster | ForEach-Object {
+            try {
+                $esxcli = Get-EsxCli -v2 -VMHost $_.Name
+                $bmcInfo = $esxcli.hardware.ipmi.bmc.get.Invoke()
+                $ipv4 = if ($bmcInfo.IPv4Address) { $bmcInfo.IPv4Address } 
+                       elseif ($bmcInfo.IP) { $bmcInfo.IP } 
+                       else { "N/A" }
+                
+                [pscustomobject]@{
+                    HostName    = $_.Name
+                    IPv4Address = $ipv4
+                }
+            } catch {
+                [pscustomobject]@{
+                    HostName    = $_.Name
+                    IPv4Address = "Error: $_"
+                }
             }
         }
     }

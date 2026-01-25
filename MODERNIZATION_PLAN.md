@@ -97,23 +97,43 @@ This document outlines a plan to modernize the PowerShell scripts in this reposi
 
 ---
 
-### Phase 4: General Modernization (Priority: LOW-MEDIUM)
+### Phase 4: Standalone Host Support (Priority: MEDIUM) ✅
 
-#### 4.1 Code Quality Improvements
+#### 4.1 Connection Type Detection
+- Add connection type detection to distinguish between vCenter and standalone ESXi host connections
+- Store connection type in `$script:connectionType` variable
+
+#### 4.2 Update Connection Function
+- Update `Connect-ToVCenter` to detect and store connection type after connection
+- Display connection type in menu status
+
+#### 4.3 Update Cluster-Based Functions
+- Update `Get-ClusterIPMI` to work with both vCenter clusters and standalone hosts
+- Update `Get-ClusterName` to prevent cluster operations on standalone hosts
+- Add appropriate error messages for standalone host scenarios
+
+#### 4.4 Menu Display Updates
+- Show connection type (vCenter/Standalone Host) in menu status display
+
+---
+
+### Phase 5: General Modernization (Priority: LOW-MEDIUM)
+
+#### 5.1 Code Quality Improvements
 - **Error Handling**: Add try-catch blocks, consistent error logging, `-ErrorAction` parameters
 - **Parameter Validation**: Validate inputs (IP addresses, hostnames, file paths), add confirmation prompts
 - **Output Formatting**: Standardize messages, consistent color coding, progress indicators
 
-#### 4.2 PowerShell Best Practices
+#### 5.2 PowerShell Best Practices
 - **Module Structure**: Consider converting to PowerShell module (.psm1), proper exports, help documentation
 - **Parameter Sets**: Use parameter sets for different modes, add `-WhatIf` and `-Confirm` support
 - **Pipeline Support**: Add pipeline support where applicable
 
-#### 4.3 Configuration Management
+#### 5.3 Configuration Management
 - **Persistent Configuration**: Save vCenter/cluster to config file, secure credential caching
 - **Logging**: Optional file logging, timestamps, `-Verbose` support
 
-#### 4.4 User Experience Improvements
+#### 5.4 User Experience Improvements
 - **Menu Enhancements**: Keyboard shortcuts, "Back" option, show last operation result
 - **Batch Operations**: Progress bars, time estimates, cancellation support
 - **Export/Import**: Export to CSV/JSON, import configuration, execution history
@@ -122,15 +142,17 @@ This document outlines a plan to modernize the PowerShell scripts in this reposi
 
 ## Implementation Priority
 
-### ✅ Completed (Phase 1-3)
+### ✅ Completed (Phase 1-4)
 - Phase 1: Authentication Fixes
 - Phase 2: Get-VMhostIpmi Integration
 - Phase 3: Set-EsxiCustomAttribute Integration
+- Phase 4: Standalone Host Support
 
 ### Short-term (Week 2-3)
 - Error handling improvements
 - Output formatting standardization
 - Configuration persistence
+- Additional standalone host support for other cluster-based functions
 
 ### Medium-term (Month 2)
 - Module structure conversion
