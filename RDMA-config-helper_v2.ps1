@@ -398,20 +398,38 @@ function Show-Menu {
         Write-Host "|  Cluster: $script:defaultCluster" -ForegroundColor $script:Theme.Info
     }
 
-    # Credentials status
-    Write-Host "|  vCenter Creds: " -NoNewline -ForegroundColor $script:Theme.Header
-    if ($null -ne $script:vCenterCreds) {
-        Write-Host "Cached ($($script:vCenterCreds.UserName))" -ForegroundColor $script:Theme.Success
+    # Credentials status - context-aware labels
+    if ($script:connectionType -eq "Standalone") {
+        # For standalone ESXi, show simpler credential info
+        Write-Host "|  ESXi Creds: " -NoNewline -ForegroundColor $script:Theme.Header
+        if ($null -ne $script:vCenterCreds) {
+            Write-Host "Cached ($($script:vCenterCreds.UserName))" -ForegroundColor $script:Theme.Success
+        }
+        else {
+            Write-Host "Not Set" -ForegroundColor $script:Theme.Warning
+        }
+        # Show SSH creds only if different from connection creds
+        if ($null -ne $script:hostCreds -and $script:hostCreds -ne $script:vCenterCreds) {
+            Write-Host "|  SSH Creds: " -NoNewline -ForegroundColor $script:Theme.Header
+            Write-Host "Cached ($($script:hostCreds.UserName))" -ForegroundColor $script:Theme.Success
+        }
     }
     else {
-        Write-Host "Not Set" -ForegroundColor $script:Theme.Warning
-    }
-    Write-Host "|  ESXi Host Creds: " -NoNewline -ForegroundColor $script:Theme.Header
-    if ($null -ne $script:hostCreds) {
-        Write-Host "Cached ($($script:hostCreds.UserName))" -ForegroundColor $script:Theme.Success
-    }
-    else {
-        Write-Host "Not Set" -ForegroundColor $script:Theme.Warning
+        # For vCenter or not connected, show both credential types
+        Write-Host "|  vCenter Creds: " -NoNewline -ForegroundColor $script:Theme.Header
+        if ($null -ne $script:vCenterCreds) {
+            Write-Host "Cached ($($script:vCenterCreds.UserName))" -ForegroundColor $script:Theme.Success
+        }
+        else {
+            Write-Host "Not Set" -ForegroundColor $script:Theme.Warning
+        }
+        Write-Host "|  ESXi Host Creds: " -NoNewline -ForegroundColor $script:Theme.Header
+        if ($null -ne $script:hostCreds) {
+            Write-Host "Cached ($($script:hostCreds.UserName))" -ForegroundColor $script:Theme.Success
+        }
+        else {
+            Write-Host "Not Set" -ForegroundColor $script:Theme.Warning
+        }
     }
 
     # Show last operation result if available
