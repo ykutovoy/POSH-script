@@ -1,6 +1,6 @@
 # Modernization Changelog
 
-**Last Updated**: January 29, 2026 (Updated with Phase 5: UI Polishing & Repository Cleanup)
+**Last Updated**: January 29, 2026 (Updated with Phase 5.1: Menu UX Improvements & Public Release)
 
 This document tracks the implementation status and changes made during the script modernization process.
 
@@ -66,6 +66,20 @@ This document tracks the implementation status and changes made during the scrip
 - ✅ Removed `get-VMhostIpmi.ps1` (functionality integrated as Option 19)
 - ✅ Removed `Set-EsxiCustomAttribute.ps1` (functionality integrated as Options 20-21)
 - ✅ Added comprehensive `README.md` with usage instructions and feature documentation
+
+#### Phase 5.1: Menu UX Improvements - COMPLETED
+- ✅ Improved disabled option messages to show context-aware reasons
+- ✅ "Not connected" shown when no connection exists
+- ✅ "Requires vCenter" shown when connected to standalone ESXi but option needs vCenter
+- ✅ Added connection validation for all operations requiring it
+- ✅ Added helpful messages for edge cases (already connected, not connected)
+
+#### Public Release Preparation - COMPLETED
+- ✅ Security audit passed - no hardcoded credentials or sensitive data
+- ✅ Removed internal infrastructure identifiers from documentation
+- ✅ Updated README.md for public contributions
+- ✅ Added `.claude/` to .gitignore
+- ✅ Repository approved for public release
 
 ### 🔄 Pending (Phase 6)
 - Configuration persistence (save settings to file)
@@ -220,7 +234,40 @@ README.md                       # Project documentation
 MODERNIZATION_CHANGELOG.md      # Implementation history
 MODERNIZATION_PLAN.md           # Future roadmap
 SECURITY_AUDIT_REPORT.md        # Security notes
+.gitignore                      # Git ignore rules
 ```
+
+### Phase 5.1 Implementation Details
+
+**Menu UX Improvements:**
+- Disabled options now show context-aware reasons instead of generic messages
+- When not connected: options show `[Not connected]`
+- When connected to standalone ESXi: cluster options show `[Requires vCenter]`
+- All options remain visible (greyed out when unavailable) for discoverability
+
+**New Helper Functions:**
+- `Test-ConnectionRequired` - Validates that a connection exists before running operations
+- Updated `Test-VCenterRequired` - Now checks both connection and vCenter requirement
+
+**Edge Case Handling:**
+- Option 1 (Connect) shows "Already connected" if already connected
+- Option 2 (Disconnect) shows "Not connected" if not connected
+- Invalid menu choices show helpful error messages
+
+### Public Release Preparation Details
+
+**Security Audit:**
+- Verified no hardcoded credentials in code
+- Verified no API keys or tokens
+- Removed internal domain names from SECURITY_AUDIT_REPORT.md
+- All config values use empty strings (user provides at runtime)
+
+**Documentation Updates:**
+- README.md updated for public contributions
+- SECURITY_AUDIT_REPORT.md status changed to "APPROVED FOR PUBLIC RELEASE"
+
+**Git Configuration:**
+- Added `.claude/` to .gitignore to prevent IDE settings from being committed
 
 ---
 

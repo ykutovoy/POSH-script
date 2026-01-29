@@ -93,6 +93,10 @@ The tool supports two connection types:
 - **vCenter Server**: Full cluster management capabilities
 - **Standalone ESXi Host**: Single host operations (cluster-wide options are disabled)
 
+Options that are unavailable are shown in gray with context-aware reasons:
+- `[Not connected]` - when no connection exists
+- `[Requires vCenter]` - when connected to standalone ESXi but the option needs vCenter
+
 ### Credential Management
 
 - Separate credential caching for vCenter and ESXi host operations

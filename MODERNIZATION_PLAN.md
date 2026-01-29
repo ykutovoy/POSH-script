@@ -134,7 +134,9 @@ This document outlines a plan to modernize the PowerShell scripts in this reposi
 #### 5.3 Menu Improvements
 - Box-drawing borders and category section headers
 - Proper number alignment
-- Disabled options shown in gray with reason
+- Disabled options shown in gray with context-aware reason:
+  - "Not connected" when no connection exists
+  - "Requires vCenter" when connected to standalone but needs vCenter
 - "Last Operation" display in header
 
 #### 5.4 Batch Operation Improvements
@@ -162,17 +164,23 @@ This document outlines a plan to modernize the PowerShell scripts in this reposi
 
 ## Implementation Priority
 
-### ✅ Completed (Phase 1-5)
+### ✅ Completed (Phase 1-5.1)
 - Phase 1: Authentication Fixes
 - Phase 2: Get-VMhostIpmi Integration
 - Phase 3: Set-EsxiCustomAttribute Integration
 - Phase 4: Standalone Host Support
 - Phase 5: UI Polishing
+- Phase 5.1: Menu UX Improvements (context-aware disabled reasons)
 
 ### Repository Cleanup ✅
 - Removed standalone scripts (get-VMhostIpmi.ps1, Set-EsxiCustomAttribute.ps1)
 - All functionality now integrated into main tool
 - Added comprehensive README.md
+
+### Public Release ✅
+- Security audit completed and passed
+- No sensitive data in codebase
+- Repository approved for public release
 
 ### Future (Phase 6)
 - Configuration persistence
