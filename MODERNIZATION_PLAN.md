@@ -119,6 +119,8 @@ This document outlines a plan to modernize the PowerShell scripts in this reposi
 
 ### Phase 5: UI Polishing (Priority: MEDIUM) ✅
 
+#### Phase 5.1: Menu UX Improvements (Priority: LOW) ✅
+
 #### 5.1 Standardized Status Indicators
 - ASCII-compatible status icons: [OK], [FAIL], [WARN], [INFO], [....]
 - Centralized color theme configuration
@@ -140,7 +142,7 @@ This document outlines a plan to modernize the PowerShell scripts in this reposi
 - "Last Operation" display in header
 
 #### 5.4 Batch Operation Improvements
-- Progress bars for all cluster operations
+- Added SSH service verification (`Ensure-SSH`) before SCP and SSH operations, with interactive start prompt when needed
 - Batch summaries with failed item details
 
 ---

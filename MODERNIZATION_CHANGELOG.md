@@ -204,7 +204,7 @@ This document tracks the implementation status and changes made during the scrip
 - "Last Operation" status line showing previous operation result
 
 **Batch Operation Improvements:**
-- Progress bars added to: Start/Stop SSH, ESXCli on Cluster, Reboot Hosts, SCP to Cluster, Install Mellanox Driver, Configure RDMA, Check DCBX, Get IPMI, Set Custom Attribute
+- Added SSH service verification (`Ensure-SSH`) before SCP and SSH operations, with interactive start prompt
 - Batch summaries show: Total | Success | Failed counts
 - Failed items listed with error details
 
