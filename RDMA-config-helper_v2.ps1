@@ -881,6 +881,41 @@ function Restart-ClusterHosts {
     Pause
 }
 
+function Ensure-SSH {
+    param(
+        [string]$HostName
+    )
+    # Retrieve the VMHost object
+    $vmHost = Get-VMHost -Name $HostName -ErrorAction SilentlyContinue
+    if (-not $vmHost) {
+        Write-Status -Type Error -Message "Host $HostName not found"
+        return $false
+    }
+
+    $sshService = Get-VMHostService -VMHost $vmHost | Where-Object {$_.Key -eq "TSM-SSH"}
+    if ($sshService -and $sshService.Running) {
+        Write-Status -Type Success -Message "SSH service already running on $HostName"
+        return $true
+    }
+
+    Write-Status -Type Warning -Message "SSH service not running on $HostName"
+    $start = Read-HostPrompt -Message "Start SSH service now?" -Type YesNo -Default 'Y'
+    if ($start) {
+        try {
+            $sshService | Start-VMHostService -Confirm:$false | Out-Null
+            Write-Status -Type Success -Message "SSH started on $HostName"
+            return $true
+        }
+        catch {
+            Write-Status -Type Error -Message "Failed to start SSH on $HostName" -Detail $_.Exception.Message
+            return $false
+        }
+    }
+    else {
+        Write-Status -Type Warning -Message "SSH not started; operation may fail"
+        return $false
+    }
+}
 function Copy-FileToHost {
     # Auto-fill hostname when connected to standalone ESXi
     $defaultHost = if ($script:connectionType -eq "Standalone") { $script:vCenterServer } else { "" }
@@ -914,19 +949,15 @@ function Copy-FileToHost {
         return
     }
 
-    # Check SSH connectivity first
-    Write-Status -Type Processing -Message "Checking SSH connectivity to $hostName"
-    try {
-        $testConnection = Test-NetConnection -ComputerName $hostName -Port 22 -WarningAction SilentlyContinue
-        if (-not $testConnection.TcpTestSucceeded) {
-            Write-Status -Type Error -Message "SSH port 22 not reachable on $hostName" -Detail "Ensure SSH service is enabled on the host"
+    # Ensure SSH service is running
+    $sshOk = Ensure-SSH -HostName $hostName
+    if (-not $sshOk) {
+        $proceed = Read-HostPrompt -Message "SSH not running. Continue anyway?" -Type YesNo -Default 'N'
+        if (-not $proceed) {
+            Write-Status -Type Warning -Message "Operation cancelled due to SSH not running"
             Pause
             return
         }
-        Write-Status -Type Success -Message "SSH port is open"
-    }
-    catch {
-        Write-Status -Type Warning -Message "Could not verify SSH connectivity" -Detail "Proceeding anyway..."
     }
 
     try {
@@ -974,7 +1005,14 @@ function Copy-FileToCluster {
         $current++
         $hostName = $vmHost.Name
         Show-BatchProgress -Operation "SCP to Cluster" -Current $current -Total $total -CurrentItem $hostName
-
+        $sshOk = Ensure-SSH -HostName $hostName
+        if (-not $sshOk) {
+            $proceed = Read-HostPrompt -Message "SSH not running on $hostName. Continue anyway?" -Type YesNo -Default 'N'
+            if (-not $proceed) {
+                $failedItems += @{ Name = $hostName; Error = "SSH not running" }
+                continue
+            }
+        }
         try {
             Set-SCPItem -ComputerName $hostName -Credential $hostCreds `
                 -Path $sourcePath -Destination $destination
