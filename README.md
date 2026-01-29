@@ -152,4 +152,4 @@ This project is provided as-is for VMware infrastructure management.
 
 ## Contributing
 
-This is a private repository. For issues or suggestions, please contact the repository owner.
+Contributions are welcome! Please feel free to submit issues or pull requests.
