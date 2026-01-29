@@ -530,13 +530,15 @@ function Get-ESXiHostCredentials {
         return $script:hostCreds
     }
 
-    # If vCenter credentials are available, offer to use them for ESXi host operations
+    # If connection credentials are available, offer to use them for SSH/SCP operations
     if ($null -ne $script:vCenterCreds) {
-        Write-Status -Type Info -Message "vCenter credentials available" -Detail "user: $($script:vCenterCreds.UserName)"
-        $useVCreds = Read-HostPrompt -Message "Use vCenter credentials for ESXi host?" -Type YesNo -Default 'N'
+        # Use context-aware label
+        $credLabel = if ($script:connectionType -eq "Standalone") { "ESXi credentials" } else { "vCenter credentials" }
+        Write-Status -Type Info -Message "$credLabel available" -Detail "user: $($script:vCenterCreds.UserName)"
+        $useVCreds = Read-HostPrompt -Message "Use same credentials for SSH/SCP?" -Type YesNo -Default 'Y'
         if ($useVCreds) {
             $script:hostCreds = $script:vCenterCreds
-            Write-Status -Type Success -Message "Using vCenter credentials for ESXi host operations"
+            Write-Status -Type Success -Message "Using cached credentials for SSH/SCP operations"
             return $script:hostCreds
         }
     }
@@ -810,7 +812,9 @@ function Invoke-ESXCliOnCluster {
 }
 
 function Invoke-ESXCliOnHost {
-    $hostName = Read-HostPrompt -Message "Enter ESXi hostname"
+    # Auto-fill hostname when connected to standalone ESXi
+    $defaultHost = if ($script:connectionType -eq "Standalone") { $script:vCenterServer } else { "" }
+    $hostName = Read-HostPrompt -Message "Enter ESXi hostname" -Default $defaultHost
     if ([string]::IsNullOrWhiteSpace($hostName)) {
         Write-Status -Type Error -Message "Hostname is required"
         Pause
@@ -823,7 +827,7 @@ function Invoke-ESXCliOnHost {
         Write-Status -Type Success -Message "Command completed"
     }
     catch {
-        Write-Status -Type Error -Message "Failed" -Detail $_
+        Write-Status -Type Error -Message "Failed" -Detail $_.Exception.Message
     }
     Pause
 }
@@ -878,7 +882,9 @@ function Restart-ClusterHosts {
 }
 
 function Copy-FileToHost {
-    $hostName = Read-HostPrompt -Message "Enter ESXi hostname"
+    # Auto-fill hostname when connected to standalone ESXi
+    $defaultHost = if ($script:connectionType -eq "Standalone") { $script:vCenterServer } else { "" }
+    $hostName = Read-HostPrompt -Message "Enter ESXi hostname" -Default $defaultHost
     if ([string]::IsNullOrWhiteSpace($hostName)) {
         Write-Status -Type Error -Message "Hostname is required"
         Pause
@@ -892,6 +898,13 @@ function Copy-FileToHost {
         return
     }
 
+    # Check if source file exists
+    if (-not (Test-Path $sourcePath)) {
+        Write-Status -Type Error -Message "Source file not found" -Detail $sourcePath
+        Pause
+        return
+    }
+
     $destination = Read-HostPrompt -Message "Enter destination path" -Default "/tmp"
 
     $hostCreds = Get-ESXiHostCredentials
@@ -901,14 +914,29 @@ function Copy-FileToHost {
         return
     }
 
+    # Check SSH connectivity first
+    Write-Status -Type Processing -Message "Checking SSH connectivity to $hostName"
+    try {
+        $testConnection = Test-NetConnection -ComputerName $hostName -Port 22 -WarningAction SilentlyContinue
+        if (-not $testConnection.TcpTestSucceeded) {
+            Write-Status -Type Error -Message "SSH port 22 not reachable on $hostName" -Detail "Ensure SSH service is enabled on the host"
+            Pause
+            return
+        }
+        Write-Status -Type Success -Message "SSH port is open"
+    }
+    catch {
+        Write-Status -Type Warning -Message "Could not verify SSH connectivity" -Detail "Proceeding anyway..."
+    }
+
     try {
         Write-Status -Type Processing -Message "Copying file to $hostName" -Detail $destination
         Set-SCPItem -ComputerName $hostName -Credential $hostCreds `
-            -Path $sourcePath -Destination $destination -Verbose
+            -Path $sourcePath -Destination $destination -ErrorAction Stop
         Write-Status -Type Success -Message "File copied successfully"
     }
     catch {
-        Write-Status -Type Error -Message "Failed" -Detail $_
+        Write-Status -Type Error -Message "SCP failed" -Detail $_.Exception.Message
     }
     Pause
 }
@@ -963,7 +991,9 @@ function Copy-FileToCluster {
 }
 
 function Install-VIBOnHost {
-    $hostName = Read-HostPrompt -Message "Enter ESXi hostname"
+    # Auto-fill hostname when connected to standalone ESXi
+    $defaultHost = if ($script:connectionType -eq "Standalone") { $script:vCenterServer } else { "" }
+    $hostName = Read-HostPrompt -Message "Enter ESXi hostname" -Default $defaultHost
     if ([string]::IsNullOrWhiteSpace($hostName)) {
         Write-Status -Type Error -Message "Hostname is required"
         Pause
@@ -984,7 +1014,7 @@ function Install-VIBOnHost {
         Write-Status -Type Success -Message "VIB installed successfully"
     }
     catch {
-        Write-Status -Type Error -Message "Failed" -Detail $_
+        Write-Status -Type Error -Message "Failed" -Detail $_.Exception.Message
     }
     Pause
 }
