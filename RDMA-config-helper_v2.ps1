@@ -358,8 +358,9 @@ function Show-Menu {
         }
     }
 
-    # Check if vCenter operations are available
-    $vCenterOnly = ($script:connectionType -eq "vCenter")
+    # Connection state flags
+    $isConnected = $script:connected
+    $isVCenter = ($script:connectionType -eq "vCenter")
 
     # Header
     Write-Host "+===============================================================+" -ForegroundColor $script:Theme.Header
@@ -368,7 +369,7 @@ function Show-Menu {
 
     # Status section
     Write-Host "|  Status: " -NoNewline -ForegroundColor $script:Theme.Header
-    if ($script:connected) {
+    if ($isConnected) {
         if ($script:connectionType -eq "Standalone") {
             Write-Host "Connected to ESXi Host: $script:vCenterServer" -ForegroundColor $script:Theme.Success
         }
@@ -393,7 +394,7 @@ function Show-Menu {
             Write-Host "|  ESXi Host: $script:vCenterServer" -ForegroundColor $script:Theme.Info
         }
     }
-    elseif ($script:connected) {
+    elseif ($isConnected) {
         Write-Host "|  Cluster: $script:defaultCluster" -ForegroundColor $script:Theme.Info
     }
 
@@ -434,47 +435,47 @@ function Show-Menu {
     # SSH Management section
     Write-Host ""
     Write-Host "-- SSH Management -------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "5" "Start SSH on cluster hosts" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
-    Write-MenuOption "6" "Stop SSH on cluster hosts" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "5" "Start SSH on cluster hosts" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
+    Write-MenuOption "6" "Stop SSH on cluster hosts" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
 
     # ESXi CLI Operations section
     Write-Host ""
     Write-Host "-- ESXi CLI Operations --------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "7" "Run ESXCli command on all hosts" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
-    Write-MenuOption "8" "Run ESXCli command on single host"
-    Write-MenuOption "9" "Reboot all hosts in cluster" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "7" "Run ESXCli command on all hosts" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
+    Write-MenuOption "8" "Run ESXCli command on single host" -Enabled $isConnected -DisabledReason "Not connected"
+    Write-MenuOption "9" "Reboot all hosts in cluster" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
 
     # File Transfer section
     Write-Host ""
     Write-Host "-- File Transfer --------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "10" "SCP file to single host"
-    Write-MenuOption "11" "SCP file to all hosts in cluster" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "10" "SCP file to single host" -Enabled $isConnected -DisabledReason "Not connected"
+    Write-MenuOption "11" "SCP file to all hosts in cluster" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
 
     # Driver/VIB Management section
     Write-Host ""
     Write-Host "-- Driver/VIB Management ------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "12" "Install VIB on single host"
-    Write-MenuOption "13" "Install Mellanox driver on cluster" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "12" "Install VIB on single host" -Enabled $isConnected -DisabledReason "Not connected"
+    Write-MenuOption "13" "Install Mellanox driver on cluster" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
 
     # SSH Commands section
     Write-Host ""
     Write-Host "-- SSH Commands ---------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "14" "Execute SSH command on cluster hosts" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "14" "Execute SSH command on cluster hosts" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
     Write-MenuOption "15" "View active SSH sessions"
     Write-MenuOption "16" "Disconnect SSH session"
 
     # RDMA/Network section
     Write-Host ""
     Write-Host "-- RDMA/Network ---------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "17" "Configure RDMA parameters" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
-    Write-MenuOption "18" "Check DCBX status" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "17" "Configure RDMA parameters" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
+    Write-MenuOption "18" "Check DCBX status" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
 
     # IPMI/Custom Attributes section
     Write-Host ""
     Write-Host "-- IPMI/Custom Attributes -----------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "19" "Get IPMI BMC Addresses"
-    Write-MenuOption "20" "Set Custom Attribute on Host" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
-    Write-MenuOption "21" "Set Custom Attribute on Cluster (from IPMI)" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "19" "Get IPMI BMC Addresses" -Enabled $isConnected -DisabledReason "Not connected"
+    Write-MenuOption "20" "Set Custom Attribute on Host" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
+    Write-MenuOption "21" "Set Custom Attribute on Cluster (from IPMI)" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
 
     # Exit
     Write-Host ""
@@ -1439,10 +1440,25 @@ function Set-ClusterCustomAttributeFromIPMI {
     Pause
 }
 
+# Helper function to check connection requirement
+function Test-ConnectionRequired {
+    if (-not $script:connected) {
+        Write-Status -Type Error -Message "This option requires a connection" -Detail "Use option 1 to connect first"
+        Pause
+        return $false
+    }
+    return $true
+}
+
 # Helper function to check vCenter requirement
 function Test-VCenterRequired {
+    if (-not $script:connected) {
+        Write-Status -Type Error -Message "This option requires a connection" -Detail "Use option 1 to connect first"
+        Pause
+        return $false
+    }
     if ($script:connectionType -ne "vCenter") {
-        Write-Status -Type Error -Message "This option requires vCenter connection"
+        Write-Status -Type Error -Message "This option requires vCenter connection" -Detail "Connected to standalone host"
         Pause
         return $false
     }
@@ -1455,25 +1471,41 @@ do {
     $choice = Read-HostPrompt -Message "Enter your choice"
 
     switch ($choice) {
-        "1" { Connect-ToVCenter }
-        "2" { Disconnect-FromVCenter }
+        "1" {
+            if ($script:connected) {
+                Write-Status -Type Warning -Message "Already connected" -Detail "Use option 2 to disconnect first"
+                Pause
+            }
+            else {
+                Connect-ToVCenter
+            }
+        }
+        "2" {
+            if (-not $script:connected) {
+                Write-Status -Type Warning -Message "Not connected" -Detail "Nothing to disconnect"
+                Pause
+            }
+            else {
+                Disconnect-FromVCenter
+            }
+        }
         "3" { Set-VCenterCredentials }
         "4" { Set-ESXiHostCredentials }
         "5" { if (Test-VCenterRequired) { Start-ClusterSSH } }
         "6" { if (Test-VCenterRequired) { Stop-ClusterSSH } }
         "7" { if (Test-VCenterRequired) { Invoke-ESXCliOnCluster } }
-        "8" { Invoke-ESXCliOnHost }
+        "8" { if (Test-ConnectionRequired) { Invoke-ESXCliOnHost } }
         "9" { if (Test-VCenterRequired) { Restart-ClusterHosts } }
-        "10" { Copy-FileToHost }
+        "10" { if (Test-ConnectionRequired) { Copy-FileToHost } }
         "11" { if (Test-VCenterRequired) { Copy-FileToCluster } }
-        "12" { Install-VIBOnHost }
+        "12" { if (Test-ConnectionRequired) { Install-VIBOnHost } }
         "13" { if (Test-VCenterRequired) { Install-MellanoxDriver } }
         "14" { if (Test-VCenterRequired) { Invoke-SSHOnCluster } }
         "15" { Show-SSHSessions }
         "16" { Remove-SSHSessionById }
         "17" { if (Test-VCenterRequired) { Set-RDMAParameters } }
         "18" { if (Test-VCenterRequired) { Get-DCBXStatus } }
-        "19" { Get-ClusterIPMI }
+        "19" { if (Test-ConnectionRequired) { Get-ClusterIPMI } }
         "20" { if (Test-VCenterRequired) { Set-HostCustomAttribute } }
         "21" { if (Test-VCenterRequired) { Set-ClusterCustomAttributeFromIPMI } }
         "0" {
@@ -1483,7 +1515,7 @@ do {
             Write-Status -Type Info -Message "Exiting..."
         }
         default {
-            Write-Status -Type Error -Message "Invalid choice" -Detail "Please enter a number 0-21"
+            Write-Status -Type Error -Message "Invalid choice" -Detail "Enter a valid option number"
             Pause
         }
     }
