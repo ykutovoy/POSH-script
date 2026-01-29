@@ -1,6 +1,6 @@
 # Modernization Changelog
 
-**Last Updated**: January 29, 2026 (Updated with Phase 5: UI Polishing)
+**Last Updated**: January 29, 2026 (Updated with Phase 5: UI Polishing & Repository Cleanup)
 
 This document tracks the implementation status and changes made during the script modernization process.
 
@@ -8,7 +8,7 @@ This document tracks the implementation status and changes made during the scrip
 
 ## Implementation Status
 
-### ✅ Completed (Phase 1-5)
+### ✅ Completed (Phase 1-5 + Repository Cleanup)
 
 #### Phase 1: Authentication Fixes - COMPLETED
 - ✅ Separate credential storage for vCenter and ESXi host credentials
@@ -61,6 +61,11 @@ This document tracks the implementation status and changes made during the scrip
 - ✅ Added batch operation summaries showing total/success/failed counts
 - ✅ Added confirmation box for dangerous reboot operation
 - ✅ Updated IPMI results to use formatted table display
+
+#### Repository Cleanup - COMPLETED
+- ✅ Removed `get-VMhostIpmi.ps1` (functionality integrated as Option 19)
+- ✅ Removed `Set-EsxiCustomAttribute.ps1` (functionality integrated as Options 20-21)
+- ✅ Added comprehensive `README.md` with usage instructions and feature documentation
 
 ### 🔄 Pending (Phase 6)
 - Configuration persistence (save settings to file)
@@ -193,6 +198,29 @@ This document tracks the implementation status and changes made during the scrip
 - All Y/N prompts use consistent format: `"Message (Y/N) [default: N]"`
 - All text prompts show defaults: `"Message [default: value]"`
 - Input validation with clear error messages
+
+### Repository Cleanup Details
+
+**Removed Files:**
+- `get-VMhostIpmi.ps1` - Standalone IPMI query script (now integrated as Option 19)
+- `Set-EsxiCustomAttribute.ps1` - Standalone custom attribute script (now integrated as Options 20-21)
+
+**Added Files:**
+- `README.md` - Comprehensive documentation including:
+  - Feature overview and menu options
+  - Installation requirements
+  - Usage instructions
+  - Connection type comparison (vCenter vs Standalone)
+  - Configuration guide
+
+**Current Repository Structure:**
+```
+RDMA-config-helper_v2.ps1      # Main tool (all features integrated)
+README.md                       # Project documentation
+MODERNIZATION_CHANGELOG.md      # Implementation history
+MODERNIZATION_PLAN.md           # Future roadmap
+SECURITY_AUDIT_REPORT.md        # Security notes
+```
 
 ---
 
