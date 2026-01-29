@@ -25,8 +25,8 @@ This project contains PowerShell scripts for ESXi/vCenter management. The code f
 
 **Lines 4-5**:
 ```powershell
-$script:vCenterServer = "vdi.vcf.yadro.com"
-$script:defaultCluster = "YFD-IN-Cluster-01"
+$script:vCenterServer = "xxx.com"
+$script:defaultCluster = "Cluster-01"
 ```
 
 **Risk Level**: Medium  
