@@ -8,125 +8,486 @@ $script:vCenterCreds = $null      # vCenter/cluster credentials
 $script:hostCreds = $null         # ESXi host/SSH credentials
 $script:connected = $false
 $script:connectionType = $null    # "vCenter" or "Standalone"
+$script:lastOperation = $null     # Track last operation result
+
+#region UI Configuration
+# Status indicators (ASCII-compatible)
+$script:Icons = @{
+    Success    = "[OK]"
+    Error      = "[FAIL]"
+    Warning    = "[WARN]"
+    Info       = "[INFO]"
+    Processing = "[....]"
+}
+
+# Color theme for consistent styling
+$script:Theme = @{
+    Header     = 'Cyan'
+    Title      = 'Yellow'
+    Success    = 'Green'
+    Error      = 'Red'
+    Warning    = 'DarkYellow'
+    Info       = 'Cyan'
+    Disabled   = 'DarkGray'
+    MenuOption = 'White'
+    Prompt     = 'Gray'
+}
+#endregion
+
+#region UI Helper Functions
+function Write-Status {
+    <#
+    .SYNOPSIS
+        Writes a standardized status message with consistent formatting.
+    .PARAMETER Type
+        The type of status message: Success, Error, Warning, Info, or Processing.
+    .PARAMETER Message
+        The main message to display.
+    .PARAMETER Detail
+        Optional additional detail to display after the message.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Success', 'Error', 'Warning', 'Info', 'Processing')]
+        [string]$Type,
+
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [string]$Detail = ""
+    )
+
+    $icon = $script:Icons[$Type]
+    $color = switch ($Type) {
+        'Success'    { $script:Theme.Success }
+        'Error'      { $script:Theme.Error }
+        'Warning'    { $script:Theme.Warning }
+        'Info'       { $script:Theme.Info }
+        'Processing' { $script:Theme.Info }
+    }
+
+    $output = "  $icon $Message"
+    if ($Detail) {
+        $output += " - $Detail"
+    }
+
+    Write-Host $output -ForegroundColor $color
+}
+
+function Read-HostPrompt {
+    <#
+    .SYNOPSIS
+        Reads user input with standardized formatting and default value support.
+    .PARAMETER Message
+        The prompt message to display.
+    .PARAMETER Default
+        Optional default value if user presses Enter without input.
+    .PARAMETER Type
+        The type of input expected: Text or YesNo.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [string]$Default = "",
+
+        [ValidateSet('Text', 'YesNo')]
+        [string]$Type = 'Text'
+    )
+
+    if ($Type -eq 'YesNo') {
+        $defaultDisplay = if ($Default -eq 'Y') { 'Y' } else { 'N' }
+        $prompt = "$Message (Y/N) [default: $defaultDisplay]"
+        $response = Read-Host $prompt
+
+        if ([string]::IsNullOrWhiteSpace($response)) {
+            return $Default -eq 'Y'
+        }
+        return ($response -eq 'Y' -or $response -eq 'y')
+    }
+    else {
+        $prompt = if ([string]::IsNullOrWhiteSpace($Default)) {
+            $Message
+        }
+        else {
+            "$Message [default: $Default]"
+        }
+
+        $response = Read-Host $prompt
+        if ([string]::IsNullOrWhiteSpace($response)) {
+            return $Default
+        }
+        return $response
+    }
+}
+
+function Show-BatchProgress {
+    <#
+    .SYNOPSIS
+        Displays a progress bar for batch operations.
+    .PARAMETER Operation
+        The name of the operation being performed.
+    .PARAMETER Current
+        The current item number (1-based).
+    .PARAMETER Total
+        The total number of items.
+    .PARAMETER CurrentItem
+        The name/identifier of the current item being processed.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$Operation,
+
+        [Parameter(Mandatory)]
+        [int]$Current,
+
+        [Parameter(Mandatory)]
+        [int]$Total,
+
+        [string]$CurrentItem = ""
+    )
+
+    $percent = [math]::Round(($Current / $Total) * 100)
+    $barWidth = 20
+    $filledWidth = [math]::Round(($percent / 100) * $barWidth)
+    $emptyWidth = $barWidth - $filledWidth
+
+    $progressBar = "[" + ("=" * $filledWidth) + (" " * $emptyWidth) + "]"
+    $status = "$progressBar $percent% ($Current/$Total)"
+
+    if ($CurrentItem) {
+        $status += " - $CurrentItem"
+    }
+
+    Write-Host "`r$status" -NoNewline -ForegroundColor $script:Theme.Info
+}
+
+function Show-BatchSummary {
+    <#
+    .SYNOPSIS
+        Displays a summary after batch operations complete.
+    .PARAMETER Operation
+        The name of the operation that was performed.
+    .PARAMETER Total
+        The total number of items processed.
+    .PARAMETER SuccessCount
+        The number of successful operations.
+    .PARAMETER FailedItems
+        An array of hashtables with 'Name' and 'Error' keys for failed items.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$Operation,
+
+        [Parameter(Mandatory)]
+        [int]$Total,
+
+        [Parameter(Mandatory)]
+        [int]$SuccessCount,
+
+        [array]$FailedItems = @()
+    )
+
+    $failedCount = $Total - $SuccessCount
+
+    Write-Host ""
+    Write-Host "+---------------------------------------------------------------+" -ForegroundColor $script:Theme.Header
+    Write-Host "|  Operation Complete: $Operation" -ForegroundColor $script:Theme.Title
+    Write-Host "+---------------------------------------------------------------+" -ForegroundColor $script:Theme.Header
+    Write-Host "|  Total: $Total | " -NoNewline -ForegroundColor $script:Theme.Info
+    Write-Host "Success: $SuccessCount" -NoNewline -ForegroundColor $script:Theme.Success
+    Write-Host " | " -NoNewline -ForegroundColor $script:Theme.Info
+    if ($failedCount -gt 0) {
+        Write-Host "Failed: $failedCount" -ForegroundColor $script:Theme.Error
+    }
+    else {
+        Write-Host "Failed: 0" -ForegroundColor $script:Theme.Success
+    }
+
+    if ($FailedItems.Count -gt 0) {
+        Write-Host "+---------------------------------------------------------------+" -ForegroundColor $script:Theme.Header
+        foreach ($item in $FailedItems) {
+            Write-Host "|  " -NoNewline -ForegroundColor $script:Theme.Header
+            Write-Host "$($item.Name): $($item.Error)" -ForegroundColor $script:Theme.Error
+        }
+    }
+    Write-Host "+---------------------------------------------------------------+" -ForegroundColor $script:Theme.Header
+
+    # Update last operation status
+    $script:lastOperation = @{
+        Name    = $Operation
+        Success = $SuccessCount -eq $Total
+        Total   = $Total
+        SuccessCount = $SuccessCount
+    }
+}
+
+function Show-ConfirmationBox {
+    <#
+    .SYNOPSIS
+        Displays a warning confirmation box for dangerous operations.
+    .PARAMETER Title
+        The title/warning message.
+    .PARAMETER Message
+        The detailed message explaining the impact.
+    .PARAMETER Detail
+        Optional additional detail (e.g., "Affected hosts: 8").
+    .RETURNS
+        $true if user types 'YES', $false otherwise.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$Title,
+
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [string]$Detail = ""
+    )
+
+    Write-Host ""
+    Write-Host "+-- WARNING -------------------------------------------------------+" -ForegroundColor $script:Theme.Warning
+    Write-Host "|  $Title" -ForegroundColor $script:Theme.Warning
+    Write-Host "|  $Message" -ForegroundColor $script:Theme.MenuOption
+    if ($Detail) {
+        Write-Host "|  $Detail" -ForegroundColor $script:Theme.Info
+    }
+    Write-Host "+------------------------------------------------------------------+" -ForegroundColor $script:Theme.Warning
+
+    $confirm = Read-Host "Type 'YES' to confirm"
+    return ($confirm -eq "YES")
+}
+
+function Show-FormattedTable {
+    <#
+    .SYNOPSIS
+        Displays data in a formatted table with box-drawing characters.
+    .PARAMETER Data
+        Array of objects to display.
+    .PARAMETER Columns
+        Array of column names to display.
+    .PARAMETER ColumnWidths
+        Hashtable of column name to width mappings.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [array]$Data,
+
+        [Parameter(Mandatory)]
+        [string[]]$Columns,
+
+        [hashtable]$ColumnWidths = @{}
+    )
+
+    # Calculate column widths if not specified
+    foreach ($col in $Columns) {
+        if (-not $ColumnWidths.ContainsKey($col)) {
+            $maxLen = ($Data | ForEach-Object { $_.$col.ToString().Length } | Measure-Object -Maximum).Maximum
+            $headerLen = $col.Length
+            $ColumnWidths[$col] = [math]::Max($maxLen, $headerLen) + 2
+        }
+    }
+
+    # Build separator line
+    $separator = "+"
+    foreach ($col in $Columns) {
+        $separator += ("-" * ($ColumnWidths[$col] + 2)) + "+"
+    }
+
+    # Print header
+    Write-Host $separator -ForegroundColor $script:Theme.Header
+    $headerLine = "|"
+    foreach ($col in $Columns) {
+        $headerLine += "  " + $col.PadRight($ColumnWidths[$col]) + "|"
+    }
+    Write-Host $headerLine -ForegroundColor $script:Theme.Title
+    Write-Host $separator -ForegroundColor $script:Theme.Header
+
+    # Print data rows
+    foreach ($row in $Data) {
+        $dataLine = "|"
+        foreach ($col in $Columns) {
+            $value = if ($null -eq $row.$col) { "" } else { $row.$col.ToString() }
+            $dataLine += "  " + $value.PadRight($ColumnWidths[$col]) + "|"
+        }
+        Write-Host $dataLine -ForegroundColor $script:Theme.MenuOption
+    }
+    Write-Host $separator -ForegroundColor $script:Theme.Header
+}
+
+function Pause {
+    <#
+    .SYNOPSIS
+        Pauses execution and waits for user input.
+    .PARAMETER Message
+        Optional custom message to display.
+    #>
+    param(
+        [string]$Message = "Press any key to return to menu..."
+    )
+
+    Write-Host ""
+    Write-Host $Message -ForegroundColor $script:Theme.Prompt
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
+#endregion
 
 function Show-Menu {
     Clear-Host
-    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host "          ESXi Cluster Management Tool" -ForegroundColor Yellow
-    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Connection Status: " -NoNewline
+
+    # Helper to write menu option with proper alignment
+    function Write-MenuOption {
+        param(
+            [string]$Number,
+            [string]$Text,
+            [bool]$Enabled = $true,
+            [string]$DisabledReason = ""
+        )
+        # Pad single-digit numbers for alignment
+        $paddedNum = if ($Number.Length -eq 1) { " $Number" } else { $Number }
+
+        if ($Enabled) {
+            Write-Host "  $paddedNum. $Text" -ForegroundColor $script:Theme.MenuOption
+        }
+        else {
+            $displayText = "$paddedNum. $Text"
+            if ($DisabledReason) {
+                $displayText += "  [$DisabledReason]"
+            }
+            Write-Host "  $displayText" -ForegroundColor $script:Theme.Disabled
+        }
+    }
+
+    # Check if vCenter operations are available
+    $vCenterOnly = ($script:connectionType -eq "vCenter")
+
+    # Header
+    Write-Host "+===============================================================+" -ForegroundColor $script:Theme.Header
+    Write-Host "|           ESXi Cluster Management Tool v2.0                   |" -ForegroundColor $script:Theme.Title
+    Write-Host "+===============================================================+" -ForegroundColor $script:Theme.Header
+
+    # Status section
+    Write-Host "|  Status: " -NoNewline -ForegroundColor $script:Theme.Header
     if ($script:connected) {
         if ($script:connectionType -eq "Standalone") {
-            Write-Host "Connected to ESXi Host: $script:vCenterServer" -ForegroundColor Green
-        } else {
-            Write-Host "Connected to vCenter: $script:vCenterServer" -ForegroundColor Green
+            Write-Host "Connected to ESXi Host: $script:vCenterServer" -ForegroundColor $script:Theme.Success
         }
-    } else {
-        Write-Host "Not Connected" -ForegroundColor Red
+        else {
+            Write-Host "Connected to vCenter: $script:vCenterServer" -ForegroundColor $script:Theme.Success
+        }
     }
+    else {
+        Write-Host "Not Connected" -ForegroundColor $script:Theme.Error
+    }
+
     if ($script:connectionType -eq "Standalone") {
         # For standalone, show ESXi host info instead of cluster
         try {
             $hostObj = Get-VMHost -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($null -ne $hostObj) {
-                Write-Host "ESXi Host:        " -NoNewline
-                Write-Host "$($hostObj.Name)" -ForegroundColor Cyan
-                Write-Host "ESXi Version:     " -NoNewline
-                Write-Host "$($hostObj.Version)" -ForegroundColor Cyan
+                Write-Host "|  ESXi Host: $($hostObj.Name)" -ForegroundColor $script:Theme.Info
+                Write-Host "|  ESXi Version: $($hostObj.Version)" -ForegroundColor $script:Theme.Info
             }
-        } catch {
-            # If we can't get host info, just show the server name
-            Write-Host "ESXi Host:        " -NoNewline
-            Write-Host "$script:vCenterServer" -ForegroundColor Cyan
         }
-    } else {
-        Write-Host "Selected Cluster:  " -NoNewline
-        Write-Host "$script:defaultCluster" -ForegroundColor Cyan
+        catch {
+            Write-Host "|  ESXi Host: $script:vCenterServer" -ForegroundColor $script:Theme.Info
+        }
     }
-    Write-Host "vCenter Credentials: " -NoNewline
+    elseif ($script:connected) {
+        Write-Host "|  Cluster: $script:defaultCluster" -ForegroundColor $script:Theme.Info
+    }
+
+    # Credentials status
+    Write-Host "|  vCenter Creds: " -NoNewline -ForegroundColor $script:Theme.Header
     if ($null -ne $script:vCenterCreds) {
-        Write-Host "Cached (user: $($script:vCenterCreds.UserName))" -ForegroundColor Green
-    } else {
-        Write-Host "Not Set" -ForegroundColor Yellow
+        Write-Host "Cached ($($script:vCenterCreds.UserName))" -ForegroundColor $script:Theme.Success
     }
-    Write-Host "ESXi Host Credentials: " -NoNewline
+    else {
+        Write-Host "Not Set" -ForegroundColor $script:Theme.Warning
+    }
+    Write-Host "|  ESXi Host Creds: " -NoNewline -ForegroundColor $script:Theme.Header
     if ($null -ne $script:hostCreds) {
-        Write-Host "Cached (user: $($script:hostCreds.UserName))" -ForegroundColor Green
-    } else {
-        Write-Host "Not Set" -ForegroundColor Yellow
+        Write-Host "Cached ($($script:hostCreds.UserName))" -ForegroundColor $script:Theme.Success
     }
-    Write-Host ""
-    Write-Host "  1. Connect to vCenter" -ForegroundColor White
-    Write-Host "  2. Disconnect from vCenter" -ForegroundColor White
-    Write-Host "  3. Set/Reset vCenter Credentials" -ForegroundColor White
-    Write-Host "  4. Set/Reset ESXi Host Credentials" -ForegroundColor White
-    Write-Host ""
-    Write-Host "SSH Management:" -ForegroundColor Yellow
-    if ($script:connectionType -eq "vCenter") {
-        Write-Host "  5. Start SSH on cluster hosts" -ForegroundColor White
-        Write-Host "  6. Stop SSH on cluster hosts" -ForegroundColor White
+    else {
+        Write-Host "Not Set" -ForegroundColor $script:Theme.Warning
     }
-    Write-Host ""
-    Write-Host "ESXi CLI Operations:" -ForegroundColor Yellow
-    if ($script:connectionType -eq "vCenter") {
-        Write-Host "  7. Run ESXCli command on all hosts" -ForegroundColor White
+
+    # Show last operation result if available
+    if ($null -ne $script:lastOperation) {
+        Write-Host "|  Last: " -NoNewline -ForegroundColor $script:Theme.Header
+        $opStatus = if ($script:lastOperation.Success) { "SUCCESS" } else { "FAILED" }
+        $opColor = if ($script:lastOperation.Success) { $script:Theme.Success } else { $script:Theme.Error }
+        Write-Host "$($script:lastOperation.Name) ($opStatus - $($script:lastOperation.SuccessCount)/$($script:lastOperation.Total) hosts)" -ForegroundColor $opColor
     }
-    Write-Host "  8. Run ESXCli command on single host" -ForegroundColor White
-    if ($script:connectionType -eq "vCenter") {
-        Write-Host "  9. Reboot all hosts in cluster" -ForegroundColor White
-    }
+
+    Write-Host "+---------------------------------------------------------------+" -ForegroundColor $script:Theme.Header
+
+    # Connection section
     Write-Host ""
-    Write-Host "File Transfer:" -ForegroundColor Yellow
-    Write-Host " 10. SCP file to single host" -ForegroundColor White
-    if ($script:connectionType -eq "vCenter") {
-        Write-Host " 11. SCP file to all hosts in cluster" -ForegroundColor White
-    }
+    Write-Host "-- Connection -----------------------------------------------------" -ForegroundColor $script:Theme.Title
+    Write-MenuOption "1" "Connect to vCenter/ESXi"
+    Write-MenuOption "2" "Disconnect"
+    Write-MenuOption "3" "Set/Reset vCenter Credentials"
+    Write-MenuOption "4" "Set/Reset ESXi Host Credentials"
+
+    # SSH Management section
     Write-Host ""
-    Write-Host "Driver/VIB Management:" -ForegroundColor Yellow
-    Write-Host " 12. Install VIB on single host" -ForegroundColor White
-    if ($script:connectionType -eq "vCenter") {
-        Write-Host " 13. Install Mellanox driver on cluster" -ForegroundColor White
-    }
+    Write-Host "-- SSH Management -------------------------------------------------" -ForegroundColor $script:Theme.Title
+    Write-MenuOption "5" "Start SSH on cluster hosts" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "6" "Stop SSH on cluster hosts" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+
+    # ESXi CLI Operations section
     Write-Host ""
-    Write-Host "SSH Commands:" -ForegroundColor Yellow
-    if ($script:connectionType -eq "vCenter") {
-        Write-Host " 14. Execute SSH command on cluster hosts" -ForegroundColor White
-    }
-    Write-Host " 15. View active SSH sessions" -ForegroundColor White
-    Write-Host " 16. Disconnect SSH session" -ForegroundColor White
+    Write-Host "-- ESXi CLI Operations --------------------------------------------" -ForegroundColor $script:Theme.Title
+    Write-MenuOption "7" "Run ESXCli command on all hosts" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "8" "Run ESXCli command on single host"
+    Write-MenuOption "9" "Reboot all hosts in cluster" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+
+    # File Transfer section
     Write-Host ""
-    Write-Host "RDMA/Network:" -ForegroundColor Yellow
-    if ($script:connectionType -eq "vCenter") {
-        Write-Host " 17. Configure RDMA parameters" -ForegroundColor White
-        Write-Host " 18. Check DCBX status" -ForegroundColor White
-    }
+    Write-Host "-- File Transfer --------------------------------------------------" -ForegroundColor $script:Theme.Title
+    Write-MenuOption "10" "SCP file to single host"
+    Write-MenuOption "11" "SCP file to all hosts in cluster" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+
+    # Driver/VIB Management section
     Write-Host ""
-    Write-Host "IPMI/Custom Attributes:" -ForegroundColor Yellow
-    Write-Host " 19. Get IPMI BMC Addresses" -ForegroundColor White
-    if ($script:connectionType -eq "vCenter") {
-        Write-Host " 20. Set Custom Attribute on Host" -ForegroundColor White
-        Write-Host " 21. Set Custom Attribute on Cluster (from IPMI)" -ForegroundColor White
-    }
+    Write-Host "-- Driver/VIB Management ------------------------------------------" -ForegroundColor $script:Theme.Title
+    Write-MenuOption "12" "Install VIB on single host"
+    Write-MenuOption "13" "Install Mellanox driver on cluster" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+
+    # SSH Commands section
     Write-Host ""
-    Write-Host "  0. Exit" -ForegroundColor Red
+    Write-Host "-- SSH Commands ---------------------------------------------------" -ForegroundColor $script:Theme.Title
+    Write-MenuOption "14" "Execute SSH command on cluster hosts" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "15" "View active SSH sessions"
+    Write-MenuOption "16" "Disconnect SSH session"
+
+    # RDMA/Network section
     Write-Host ""
-    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "-- RDMA/Network ---------------------------------------------------" -ForegroundColor $script:Theme.Title
+    Write-MenuOption "17" "Configure RDMA parameters" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "18" "Check DCBX status" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+
+    # IPMI/Custom Attributes section
+    Write-Host ""
+    Write-Host "-- IPMI/Custom Attributes -----------------------------------------" -ForegroundColor $script:Theme.Title
+    Write-MenuOption "19" "Get IPMI BMC Addresses"
+    Write-MenuOption "20" "Set Custom Attribute on Host" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+    Write-MenuOption "21" "Set Custom Attribute on Cluster (from IPMI)" -Enabled $vCenterOnly -DisabledReason "Requires vCenter"
+
+    # Exit
+    Write-Host ""
+    Write-Host "   0. Exit" -ForegroundColor $script:Theme.Error
+    Write-Host ""
+    Write-Host "+===============================================================+" -ForegroundColor $script:Theme.Header
 }
 
 function Get-VCenterName {
-    $defaultPrompt = if ([string]::IsNullOrWhiteSpace($script:vCenterServer)) { 
-        "Enter vCenter name" 
-    } else { 
-        "Enter vCenter name [default: $script:vCenterServer]" 
-    }
-    $vCenter = Read-Host $defaultPrompt
+    $vCenter = Read-HostPrompt -Message "Enter vCenter/ESXi hostname" -Default $script:vCenterServer
     if ([string]::IsNullOrWhiteSpace($vCenter)) {
-        if ([string]::IsNullOrWhiteSpace($script:vCenterServer)) {
-            Write-Error "vCenter name is required and no default is set."
-            return $null
-        }
-        return $script:vCenterServer
+        Write-Status -Type Error -Message "Hostname is required and no default is set"
+        return $null
     }
     $script:vCenterServer = $vCenter  # Update default for next time
     return $vCenter
@@ -145,84 +506,88 @@ function Get-VCenterCredentials {
 
 function Get-ESXiHostCredentials {
     param([switch]$Force)
-    
+
     if (-not $Force -and $null -ne $script:hostCreds) {
         return $script:hostCreds
     }
-    
+
     # If vCenter credentials are available, offer to use them for ESXi host operations
     if ($null -ne $script:vCenterCreds) {
-        Write-Host "vCenter credentials are available (user: $($script:vCenterCreds.UserName))" -ForegroundColor Cyan
-        $useVCreds = Read-Host "Use vCenter credentials for ESXi host? (Y/N) [default: N]"
-        if ($useVCreds -eq "Y" -or $useVCreds -eq "y") {
+        Write-Status -Type Info -Message "vCenter credentials available" -Detail "user: $($script:vCenterCreds.UserName)"
+        $useVCreds = Read-HostPrompt -Message "Use vCenter credentials for ESXi host?" -Type YesNo -Default 'N'
+        if ($useVCreds) {
             $script:hostCreds = $script:vCenterCreds
-            Write-Host "Using vCenter credentials for ESXi host operations." -ForegroundColor Green
+            Write-Status -Type Success -Message "Using vCenter credentials for ESXi host operations"
             return $script:hostCreds
         }
     }
-    
+
     $script:hostCreds = Get-Credential -Message "Enter ESXi host credentials (typically 'root')"
     return $script:hostCreds
 }
 
 function Set-VCenterCredentials {
-    Write-Host "Setting vCenter credentials..." -ForegroundColor Yellow
+    Write-Status -Type Info -Message "Setting vCenter credentials"
     if ($null -ne $script:vCenterCreds) {
-        Write-Host "Current credentials: $($script:vCenterCreds.UserName)" -ForegroundColor Cyan
-        $reset = Read-Host "Reset credentials? (Y/N)"
-        if ($reset -ne "Y" -and $reset -ne "y") {
-            Write-Host "Keeping existing credentials." -ForegroundColor Green
+        Write-Status -Type Info -Message "Current credentials" -Detail $script:vCenterCreds.UserName
+        $reset = Read-HostPrompt -Message "Reset credentials?" -Type YesNo -Default 'N'
+        if (-not $reset) {
+            Write-Status -Type Success -Message "Keeping existing credentials"
             Pause
             return
         }
     }
-    
+
     try {
         $script:vCenterCreds = Get-Credential -Message "Enter vCenter credentials"
         if ($null -ne $script:vCenterCreds) {
-            Write-Host "✓ Credentials set for user: $($script:vCenterCreds.UserName)" -ForegroundColor Green
-        } else {
-            Write-Host "✗ Credential entry cancelled." -ForegroundColor Yellow
+            Write-Status -Type Success -Message "Credentials set" -Detail "user: $($script:vCenterCreds.UserName)"
         }
-    } catch {
-        Write-Host "✗ Failed to set credentials: $_" -ForegroundColor Red
+        else {
+            Write-Status -Type Warning -Message "Credential entry cancelled"
+        }
+    }
+    catch {
+        Write-Status -Type Error -Message "Failed to set credentials" -Detail $_
     }
     Pause
 }
 
 function Set-ESXiHostCredentials {
-    Write-Host "Setting ESXi host credentials..." -ForegroundColor Yellow
+    Write-Status -Type Info -Message "Setting ESXi host credentials"
     if ($null -ne $script:hostCreds) {
-        Write-Host "Current credentials: $($script:hostCreds.UserName)" -ForegroundColor Cyan
-        $reset = Read-Host "Reset credentials? (Y/N)"
-        if ($reset -ne "Y" -and $reset -ne "y") {
-            Write-Host "Keeping existing credentials." -ForegroundColor Green
+        Write-Status -Type Info -Message "Current credentials" -Detail $script:hostCreds.UserName
+        $reset = Read-HostPrompt -Message "Reset credentials?" -Type YesNo -Default 'N'
+        if (-not $reset) {
+            Write-Status -Type Success -Message "Keeping existing credentials"
             Pause
             return
         }
     }
-    
+
     # If vCenter credentials are available, offer to use them
     if ($null -ne $script:vCenterCreds) {
-        Write-Host "vCenter credentials are available (user: $($script:vCenterCreds.UserName))" -ForegroundColor Cyan
-        $useVCreds = Read-Host "Use vCenter credentials for ESXi host? (Y/N) [default: N]"
-        if ($useVCreds -eq "Y" -or $useVCreds -eq "y") {
+        Write-Status -Type Info -Message "vCenter credentials available" -Detail "user: $($script:vCenterCreds.UserName)"
+        $useVCreds = Read-HostPrompt -Message "Use vCenter credentials for ESXi host?" -Type YesNo -Default 'N'
+        if ($useVCreds) {
             $script:hostCreds = $script:vCenterCreds
-            Write-Host "✓ Using vCenter credentials for ESXi host operations." -ForegroundColor Green
+            Write-Status -Type Success -Message "Using vCenter credentials for ESXi host operations"
             Pause
             return
         }
     }
-    
+
     try {
         $script:hostCreds = Get-Credential -Message "Enter ESXi host credentials (typically 'root')"
         if ($null -ne $script:hostCreds) {
-            Write-Host "✓ Credentials set for user: $($script:hostCreds.UserName)" -ForegroundColor Green
-        } else {
-            Write-Host "✗ Credential entry cancelled." -ForegroundColor Yellow
+            Write-Status -Type Success -Message "Credentials set" -Detail "user: $($script:hostCreds.UserName)"
         }
-    } catch {
-        Write-Host "✗ Failed to set credentials: $_" -ForegroundColor Red
+        else {
+            Write-Status -Type Warning -Message "Credential entry cancelled"
+        }
+    }
+    catch {
+        Write-Status -Type Error -Message "Failed to set credentials" -Detail $_
     }
     Pause
 }
@@ -246,22 +611,14 @@ function Test-IsVCenter {
 function Get-ClusterName {
     # Check if we're connected to a standalone host
     if ($script:connectionType -eq "Standalone") {
-        Write-Error "This operation requires a cluster, but you are connected to a standalone host."
+        Write-Status -Type Error -Message "This operation requires a cluster" -Detail "connected to standalone host"
         return $null
     }
-    
-    $defaultPrompt = if ([string]::IsNullOrWhiteSpace($script:defaultCluster)) { 
-        "Enter cluster name" 
-    } else { 
-        "Enter cluster name [default: $script:defaultCluster]" 
-    }
-    $cluster = Read-Host $defaultPrompt
+
+    $cluster = Read-HostPrompt -Message "Enter cluster name" -Default $script:defaultCluster
     if ([string]::IsNullOrWhiteSpace($cluster)) {
-        if ([string]::IsNullOrWhiteSpace($script:defaultCluster)) {
-            Write-Error "Cluster name is required and no default is set."
-            return $null
-        }
-        return $script:defaultCluster
+        Write-Status -Type Error -Message "Cluster name is required and no default is set"
+        return $null
     }
     $script:defaultCluster = $cluster  # Update the script variable
     return $cluster
@@ -269,31 +626,37 @@ function Get-ClusterName {
 
 function Connect-ToVCenter {
     $vCenter = Get-VCenterName
-    
-    # Get vCenter credentials (use cache if available)
-    $vCenterCreds = Get-VCenterCredentials
-    if ($null -eq $vCenterCreds) {
-        Write-Host "Connection cancelled." -ForegroundColor Yellow
+    if ($null -eq $vCenter) {
         Pause
         return
     }
-    
+
+    # Get vCenter credentials (use cache if available)
+    $vCenterCreds = Get-VCenterCredentials
+    if ($null -eq $vCenterCreds) {
+        Write-Status -Type Warning -Message "Connection cancelled"
+        Pause
+        return
+    }
+
     try {
-        Write-Host "Connecting to $vCenter..." -ForegroundColor Yellow
+        Write-Status -Type Processing -Message "Connecting to $vCenter"
         Connect-VIServer $vCenter -Credential $vCenterCreds -Force -ErrorAction Stop
         $script:vCenterServer = $vCenter
         $script:connected = $true
-        
+
         # Detect connection type
         if (Test-IsVCenter) {
             $script:connectionType = "vCenter"
-            Write-Host "Successfully connected to vCenter!" -ForegroundColor Green
-        } else {
-            $script:connectionType = "Standalone"
-            Write-Host "Successfully connected to standalone ESXi host!" -ForegroundColor Green
+            Write-Status -Type Success -Message "Connected to vCenter" -Detail $vCenter
         }
-    } catch { 
-        Write-Host "Failed to connect: $_" -ForegroundColor Red
+        else {
+            $script:connectionType = "Standalone"
+            Write-Status -Type Success -Message "Connected to standalone ESXi host" -Detail $vCenter
+        }
+    }
+    catch {
+        Write-Status -Type Error -Message "Failed to connect" -Detail $_
         $script:connected = $false
         $script:connectionType = $null
     }
@@ -302,215 +665,378 @@ function Connect-ToVCenter {
 
 function Disconnect-FromVCenter {
     try {
+        Write-Status -Type Processing -Message "Disconnecting from $script:vCenterServer"
         Disconnect-VIServer $script:vCenterServer -Confirm:$false -ErrorAction Stop
         $script:connected = $false
         $script:connectionType = $null
-        Write-Host "Disconnected successfully!" -ForegroundColor Green
-    } catch {
-        Write-Host "Failed to disconnect: $_" -ForegroundColor Red
+        Write-Status -Type Success -Message "Disconnected successfully"
+    }
+    catch {
+        Write-Status -Type Error -Message "Failed to disconnect" -Detail $_
     }
     Pause
 }
 
 function Start-ClusterSSH {
     $cluster = Get-ClusterName
-    Write-Host "Starting SSH on hosts in cluster: $cluster" -ForegroundColor Yellow
-    
-    Get-VMHost -Location $cluster | ForEach-Object {
-        $hostName = $_.Name
-        Write-Host "Processing: $hostName" -ForegroundColor Cyan
+    if ($null -eq $cluster) {
+        Pause
+        return
+    }
+
+    Write-Status -Type Info -Message "Starting SSH on hosts in cluster" -Detail $cluster
+
+    $hosts = @(Get-VMHost -Location $cluster)
+    $total = $hosts.Count
+    $current = 0
+    $successCount = 0
+    $failedItems = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        $hostName = $vmHost.Name
+        Show-BatchProgress -Operation "Start SSH" -Current $current -Total $total -CurrentItem $hostName
+
         try {
-            Get-VMHost -Name $hostName | Get-VMHostService | 
-                Where-Object Key -EQ "TSM-SSH" | Start-VMHostService -Confirm:$false
-            Write-Host "  ✓ SSH started" -ForegroundColor Green
-        } catch {
-            Write-Host "  ✗ Failed: $_" -ForegroundColor Red
+            Get-VMHost -Name $hostName | Get-VMHostService |
+                Where-Object Key -EQ "TSM-SSH" | Start-VMHostService -Confirm:$false | Out-Null
+            $successCount++
+        }
+        catch {
+            $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
+
+    Write-Host ""  # Clear progress line
+    Show-BatchSummary -Operation "Start SSH on Cluster" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
 function Stop-ClusterSSH {
     $cluster = Get-ClusterName
-    Write-Host "Stopping SSH on hosts in cluster: $cluster" -ForegroundColor Yellow
-    
-    Get-VMHost -Location $cluster | ForEach-Object {
-        $hostName = $_.Name
-        Write-Host "Processing: $hostName" -ForegroundColor Cyan
+    if ($null -eq $cluster) {
+        Pause
+        return
+    }
+
+    Write-Status -Type Info -Message "Stopping SSH on hosts in cluster" -Detail $cluster
+
+    $hosts = @(Get-VMHost -Location $cluster)
+    $total = $hosts.Count
+    $current = 0
+    $successCount = 0
+    $failedItems = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        $hostName = $vmHost.Name
+        Show-BatchProgress -Operation "Stop SSH" -Current $current -Total $total -CurrentItem $hostName
+
         try {
-            Get-VMHost -Name $hostName | Get-VMHostService | 
-                Where-Object Key -EQ "TSM-SSH" | Stop-VMHostService -Confirm:$false
-            Write-Host "  ✓ SSH stopped" -ForegroundColor Green
-        } catch {
-            Write-Host "  ✗ Failed: $_" -ForegroundColor Red
+            Get-VMHost -Name $hostName | Get-VMHostService |
+                Where-Object Key -EQ "TSM-SSH" | Stop-VMHostService -Confirm:$false | Out-Null
+            $successCount++
+        }
+        catch {
+            $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
+
+    Write-Host ""  # Clear progress line
+    Show-BatchSummary -Operation "Stop SSH on Cluster" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
 function Invoke-ESXCliOnCluster {
     $cluster = Get-ClusterName
-    $uuid = Read-Host "Enter UUID for vsan.debug.object.list"
-    
-    Write-Host "Running ESXCli command on cluster: $cluster" -ForegroundColor Yellow
-    
-    Get-VMHost -Location $cluster | ForEach-Object {
-        $hostName = $_.Name
-        Write-Host "`n$hostName" -ForegroundColor Cyan
+    if ($null -eq $cluster) {
+        Pause
+        return
+    }
+
+    $uuid = Read-HostPrompt -Message "Enter UUID for vsan.debug.object.list"
+    if ([string]::IsNullOrWhiteSpace($uuid)) {
+        Write-Status -Type Error -Message "UUID is required"
+        Pause
+        return
+    }
+
+    Write-Status -Type Info -Message "Running ESXCli command on cluster" -Detail $cluster
+
+    $hosts = @(Get-VMHost -Location $cluster)
+    $total = $hosts.Count
+    $current = 0
+    $successCount = 0
+    $failedItems = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        $hostName = $vmHost.Name
+        Write-Host ""
+        Write-Host "[$current/$total] $hostName" -ForegroundColor $script:Theme.Info
+
         try {
             $esxcli = Get-EsxCli -v2 -VMHost $hostName
-            $esxcli.vsan.debug.object.list.invoke(@{uuid=$uuid})
-        } catch {
-            Write-Host "  ✗ Failed: $_" -ForegroundColor Red
+            $esxcli.vsan.debug.object.list.invoke(@{uuid = $uuid })
+            $successCount++
+        }
+        catch {
+            Write-Status -Type Error -Message "Failed" -Detail $_
+            $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
+
+    Show-BatchSummary -Operation "ESXCli on Cluster" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
 function Invoke-ESXCliOnHost {
-    $hostName = Read-Host "Enter ESXi hostname"
-    
-    Write-Host "Getting ESXCli createargs for: $hostName" -ForegroundColor Yellow
+    $hostName = Read-HostPrompt -Message "Enter ESXi hostname"
+    if ([string]::IsNullOrWhiteSpace($hostName)) {
+        Write-Status -Type Error -Message "Hostname is required"
+        Pause
+        return
+    }
+
+    Write-Status -Type Processing -Message "Getting ESXCli createargs for" -Detail $hostName
     try {
         (Get-EsxCli -v2 -VMHost $hostName).vsan.debug.object.list.createargs()
-    } catch {
-        Write-Host "Failed: $_" -ForegroundColor Red
+        Write-Status -Type Success -Message "Command completed"
+    }
+    catch {
+        Write-Status -Type Error -Message "Failed" -Detail $_
     }
     Pause
 }
 
 function Restart-ClusterHosts {
     $cluster = Get-ClusterName
-    $confirm = Read-Host "WARNING: This will reboot ALL hosts in $cluster. Type YES to continue"
-    
-    if ($confirm -ne "YES") {
-        Write-Host "Operation cancelled." -ForegroundColor Yellow
+    if ($null -eq $cluster) {
         Pause
         return
     }
-    
-    $reason = Read-Host "Enter reboot reason"
-    
-    Get-VMHost -Location $cluster | ForEach-Object {
-        $hostName = $_.Name
-        Write-Host "Rebooting: $hostName" -ForegroundColor Cyan
+
+    # Get host count for warning message
+    $hosts = @(Get-VMHost -Location $cluster)
+    $hostCount = $hosts.Count
+
+    $confirmed = Show-ConfirmationBox `
+        -Title "REBOOT ALL HOSTS" `
+        -Message "This will reboot ALL hosts in cluster: $cluster" `
+        -Detail "Affected hosts: $hostCount"
+
+    if (-not $confirmed) {
+        Write-Status -Type Warning -Message "Operation cancelled"
+        Pause
+        return
+    }
+
+    $reason = Read-HostPrompt -Message "Enter reboot reason" -Default "Scheduled maintenance"
+
+    $total = $hostCount
+    $current = 0
+    $successCount = 0
+    $failedItems = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        $hostName = $vmHost.Name
+        Show-BatchProgress -Operation "Reboot Hosts" -Current $current -Total $total -CurrentItem $hostName
+
         try {
             $esxcli = Get-EsxCli -v2 -VMHost $hostName
-            $esxcli.system.shutdown.reboot.invoke(@{reason=$reason})
-            Write-Host "  ✓ Reboot initiated" -ForegroundColor Green
-        } catch {
-            Write-Host "  ✗ Failed: $_" -ForegroundColor Red
+            $esxcli.system.shutdown.reboot.invoke(@{reason = $reason })
+            $successCount++
+        }
+        catch {
+            $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
+
+    Write-Host ""  # Clear progress line
+    Show-BatchSummary -Operation "Reboot Cluster Hosts" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
 function Copy-FileToHost {
-    $hostName = Read-Host "Enter ESXi hostname"
-    $sourcePath = Read-Host "Enter source file path"
-    $destination = Read-Host "Enter destination path [default: /tmp]"
-    
-    if ([string]::IsNullOrWhiteSpace($destination)) {
-        $destination = "/tmp"
-    }
-    
-    $hostCreds = Get-ESXiHostCredentials
-    if ($null -eq $hostCreds) {
-        Write-Host "Operation cancelled." -ForegroundColor Yellow
+    $hostName = Read-HostPrompt -Message "Enter ESXi hostname"
+    if ([string]::IsNullOrWhiteSpace($hostName)) {
+        Write-Status -Type Error -Message "Hostname is required"
         Pause
         return
     }
-    
+
+    $sourcePath = Read-HostPrompt -Message "Enter source file path"
+    if ([string]::IsNullOrWhiteSpace($sourcePath)) {
+        Write-Status -Type Error -Message "Source path is required"
+        Pause
+        return
+    }
+
+    $destination = Read-HostPrompt -Message "Enter destination path" -Default "/tmp"
+
+    $hostCreds = Get-ESXiHostCredentials
+    if ($null -eq $hostCreds) {
+        Write-Status -Type Warning -Message "Operation cancelled"
+        Pause
+        return
+    }
+
     try {
-        Write-Host "Copying file to $hostName..." -ForegroundColor Yellow
+        Write-Status -Type Processing -Message "Copying file to $hostName" -Detail $destination
         Set-SCPItem -ComputerName $hostName -Credential $hostCreds `
             -Path $sourcePath -Destination $destination -Verbose
-        Write-Host "✓ File copied successfully" -ForegroundColor Green
-    } catch {
-        Write-Host "✗ Failed: $_" -ForegroundColor Red
+        Write-Status -Type Success -Message "File copied successfully"
+    }
+    catch {
+        Write-Status -Type Error -Message "Failed" -Detail $_
     }
     Pause
 }
 
 function Copy-FileToCluster {
     $cluster = Get-ClusterName
-    $sourcePath = Read-Host "Enter source file path"
-    $destination = Read-Host "Enter destination path [default: /tmp]"
-    
-    if ([string]::IsNullOrWhiteSpace($destination)) {
-        $destination = "/tmp"
-    }
-    
-    $hostCreds = Get-ESXiHostCredentials
-    if ($null -eq $hostCreds) {
-        Write-Host "Operation cancelled." -ForegroundColor Yellow
+    if ($null -eq $cluster) {
         Pause
         return
     }
-    
-    Get-VMHost -Location $cluster | ForEach-Object {
-        $hostName = $_.Name
-        Write-Host "Copying to: $hostName" -ForegroundColor Cyan
+
+    $sourcePath = Read-HostPrompt -Message "Enter source file path"
+    if ([string]::IsNullOrWhiteSpace($sourcePath)) {
+        Write-Status -Type Error -Message "Source path is required"
+        Pause
+        return
+    }
+
+    $destination = Read-HostPrompt -Message "Enter destination path" -Default "/tmp"
+
+    $hostCreds = Get-ESXiHostCredentials
+    if ($null -eq $hostCreds) {
+        Write-Status -Type Warning -Message "Operation cancelled"
+        Pause
+        return
+    }
+
+    $hosts = @(Get-VMHost -Location $cluster)
+    $total = $hosts.Count
+    $current = 0
+    $successCount = 0
+    $failedItems = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        $hostName = $vmHost.Name
+        Show-BatchProgress -Operation "SCP to Cluster" -Current $current -Total $total -CurrentItem $hostName
+
         try {
             Set-SCPItem -ComputerName $hostName -Credential $hostCreds `
-                -Path $sourcePath -Destination $destination -Verbose
-            Write-Host "  ✓ Success" -ForegroundColor Green
-        } catch {
-            Write-Host "  ✗ Failed: $_" -ForegroundColor Red
+                -Path $sourcePath -Destination $destination
+            $successCount++
+        }
+        catch {
+            $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
+
+    Write-Host ""  # Clear progress line
+    Show-BatchSummary -Operation "SCP File to Cluster" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
 function Install-VIBOnHost {
-    $hostName = Read-Host "Enter ESXi hostname"
-    $vibUrl = Read-Host "Enter VIB URL (local path on ESXi host)"
-    
+    $hostName = Read-HostPrompt -Message "Enter ESXi hostname"
+    if ([string]::IsNullOrWhiteSpace($hostName)) {
+        Write-Status -Type Error -Message "Hostname is required"
+        Pause
+        return
+    }
+
+    $vibUrl = Read-HostPrompt -Message "Enter VIB URL (local path on ESXi host)"
+    if ([string]::IsNullOrWhiteSpace($vibUrl)) {
+        Write-Status -Type Error -Message "VIB URL is required"
+        Pause
+        return
+    }
+
     try {
-        Write-Host "Installing VIB on $hostName..." -ForegroundColor Yellow
+        Write-Status -Type Processing -Message "Installing VIB on $hostName"
         $esxcli = Get-EsxCli -v2 -VMHost $hostName
-        $esxcli.software.vib.install.invoke(@{viburl=$vibUrl; nosigcheck="true"})
-        Write-Host "✓ VIB installed successfully" -ForegroundColor Green
-    } catch {
-        Write-Host "✗ Failed: $_" -ForegroundColor Red
+        $esxcli.software.vib.install.invoke(@{viburl = $vibUrl; nosigcheck = "true" })
+        Write-Status -Type Success -Message "VIB installed successfully"
+    }
+    catch {
+        Write-Status -Type Error -Message "Failed" -Detail $_
     }
     Pause
 }
 
 function Install-MellanoxDriver {
     $cluster = Get-ClusterName
-    $scriptPath = Read-Host "Enter path to SSH-mellanox-install.ps1"
-    
-    Get-VMHost -Location $cluster | ForEach-Object {
-        $hostName = $_.Name
-        Write-Host "Installing on: $hostName" -ForegroundColor Cyan
+    if ($null -eq $cluster) {
+        Pause
+        return
+    }
+
+    $scriptPath = Read-HostPrompt -Message "Enter path to SSH-mellanox-install.ps1"
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+        Write-Status -Type Error -Message "Script path is required"
+        Pause
+        return
+    }
+
+    if (-not (Test-Path $scriptPath)) {
+        Write-Status -Type Error -Message "Script not found" -Detail $scriptPath
+        Pause
+        return
+    }
+
+    $hosts = @(Get-VMHost -Location $cluster)
+    $total = $hosts.Count
+    $current = 0
+    $successCount = 0
+    $failedItems = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        $hostName = $vmHost.Name
+        Show-BatchProgress -Operation "Install Mellanox Driver" -Current $current -Total $total -CurrentItem $hostName
+
         try {
             & $scriptPath -sshHost $hostName
-            Write-Host "  ✓ Success" -ForegroundColor Green
-        } catch {
-            Write-Host "  ✗ Failed: $_" -ForegroundColor Red
+            $successCount++
+        }
+        catch {
+            $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
+
+    Write-Host ""  # Clear progress line
+    Show-BatchSummary -Operation "Install Mellanox Driver" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
 function Invoke-SSHOnCluster {
     $cluster = Get-ClusterName
-    
+    if ($null -eq $cluster) {
+        Pause
+        return
+    }
+
     # Command templates from original script
-    Write-Host "`nSelect a command template or enter custom:" -ForegroundColor Yellow
-    Write-Host "  1. rm -f /tmp/*.vib" -ForegroundColor White
-    Write-Host "  2. rm -f /tmp/*.bin" -ForegroundColor White
-    Write-Host "  3. ls -lah /tmp" -ForegroundColor White
-    Write-Host "  4. esxcli mellanox mft flint query -d mt4117_pciconf0 -r" -ForegroundColor White
-    Write-Host "  5. vsish -e get /vmkModules/rdt/allConnCount" -ForegroundColor White
-    Write-Host "  6. vsish -e get /vmkModules/rdt/clusterProtocol" -ForegroundColor White
-    Write-Host "  7. esxcli mellanox mft mst status" -ForegroundColor White
-    Write-Host "  8. Custom command (type your own)" -ForegroundColor White
     Write-Host ""
-    
-    $templateChoice = Read-Host "Select template (1-8)"
-    
+    Write-Host "-- Select Command Template ----------------------------------------" -ForegroundColor $script:Theme.Title
+    Write-Host "   1. rm -f /tmp/*.vib" -ForegroundColor $script:Theme.MenuOption
+    Write-Host "   2. rm -f /tmp/*.bin" -ForegroundColor $script:Theme.MenuOption
+    Write-Host "   3. ls -lah /tmp" -ForegroundColor $script:Theme.MenuOption
+    Write-Host "   4. esxcli mellanox mft flint query -d mt4117_pciconf0 -r" -ForegroundColor $script:Theme.MenuOption
+    Write-Host "   5. vsish -e get /vmkModules/rdt/allConnCount" -ForegroundColor $script:Theme.MenuOption
+    Write-Host "   6. vsish -e get /vmkModules/rdt/clusterProtocol" -ForegroundColor $script:Theme.MenuOption
+    Write-Host "   7. esxcli mellanox mft mst status" -ForegroundColor $script:Theme.MenuOption
+    Write-Host "   8. Custom command (type your own)" -ForegroundColor $script:Theme.MenuOption
+    Write-Host ""
+
+    $templateChoice = Read-HostPrompt -Message "Select template (1-8)"
+
     $command = switch ($templateChoice) {
         "1" { "rm -f /tmp/*.vib" }
         "2" { "rm -f /tmp/*.bin" }
@@ -519,108 +1045,180 @@ function Invoke-SSHOnCluster {
         "5" { "vsish -e get /vmkModules/rdt/allConnCount" }
         "6" { "vsish -e get /vmkModules/rdt/clusterProtocol" }
         "7" { "esxcli mellanox mft mst status" }
-        "8" { Read-Host "Enter custom command" }
-        default { 
-            Write-Host "Invalid selection, using custom input" -ForegroundColor Red
-            Read-Host "Enter command"
+        "8" { Read-HostPrompt -Message "Enter custom command" }
+        default {
+            Write-Status -Type Warning -Message "Invalid selection, using custom input"
+            Read-HostPrompt -Message "Enter command"
         }
     }
-    
+
     # Allow editing the selected command
-    Write-Host "`nSelected command: $command" -ForegroundColor Cyan
-    $edit = Read-Host "Edit command? (Y/N) [default: N]"
-    
-    if ($edit -eq "Y" -or $edit -eq "y") {
-        Write-Host "Current: $command" -ForegroundColor Gray
-        $command = Read-Host "Enter modified command"
+    Write-Status -Type Info -Message "Selected command" -Detail $command
+    $edit = Read-HostPrompt -Message "Edit command?" -Type YesNo -Default 'N'
+
+    if ($edit) {
+        $command = Read-HostPrompt -Message "Enter modified command" -Default $command
     }
-    
-    Write-Host "`nExecuting: $command" -ForegroundColor Green
-    $confirm = Read-Host "Continue? (Y/N)"
-    
-    if ($confirm -ne "Y" -and $confirm -ne "y") {
-        Write-Host "Operation cancelled." -ForegroundColor Yellow
+
+    Write-Host ""
+    Write-Status -Type Info -Message "Will execute" -Detail $command
+    $confirm = Read-HostPrompt -Message "Continue?" -Type YesNo -Default 'Y'
+
+    if (-not $confirm) {
+        Write-Status -Type Warning -Message "Operation cancelled"
         Pause
         return
     }
-    
+
     $hostCreds = Get-ESXiHostCredentials
     if ($null -eq $hostCreds) {
-        Write-Host "Operation cancelled." -ForegroundColor Yellow
+        Write-Status -Type Warning -Message "Operation cancelled"
         Pause
         return
     }
-    
-    Get-VMHost -Location $cluster | ForEach-Object {
-        $hostName = $_.Name
-        Write-Host "`n$hostName" -ForegroundColor Cyan
+
+    $hosts = @(Get-VMHost -Location $cluster)
+    $total = $hosts.Count
+    $current = 0
+    $successCount = 0
+    $failedItems = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        $hostName = $vmHost.Name
+        Write-Host ""
+        Write-Host "[$current/$total] $hostName" -ForegroundColor $script:Theme.Info
+
         try {
             $session = New-SSHSession -ComputerName $hostName -Credential $hostCreds
             $result = Invoke-SSHCommand -Command $command -SessionId $session.SessionId
             Write-Host $result.Output
-            Remove-SSHSession -SessionId $session.SessionId
-        } catch {
-            Write-Host "  ✗ Failed: $_" -ForegroundColor Red
+            Remove-SSHSession -SessionId $session.SessionId | Out-Null
+            $successCount++
+        }
+        catch {
+            Write-Status -Type Error -Message "Failed" -Detail $_
+            $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
+
+    Show-BatchSummary -Operation "SSH Command on Cluster" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
 function Show-SSHSessions {
-    Write-Host "Active SSH Sessions:" -ForegroundColor Yellow
-    Get-SSHSession | Format-Table -AutoSize
+    Write-Status -Type Info -Message "Active SSH Sessions"
+    $sessions = Get-SSHSession
+    if ($sessions) {
+        $sessions | Format-Table -AutoSize
+    }
+    else {
+        Write-Status -Type Info -Message "No active SSH sessions"
+    }
     Pause
 }
 
 function Remove-SSHSessionById {
-    Show-SSHSessions
-    $sessionId = Read-Host "Enter Session ID to disconnect"
+    Write-Status -Type Info -Message "Active SSH Sessions"
+    $sessions = Get-SSHSession
+    if ($sessions) {
+        $sessions | Format-Table -AutoSize
+    }
+    else {
+        Write-Status -Type Info -Message "No active SSH sessions"
+        Pause
+        return
+    }
+
+    $sessionId = Read-HostPrompt -Message "Enter Session ID to disconnect"
+    if ([string]::IsNullOrWhiteSpace($sessionId)) {
+        Write-Status -Type Warning -Message "Operation cancelled"
+        Pause
+        return
+    }
+
     try {
         Remove-SSHSession -SessionId $sessionId
-        Write-Host "✓ Session disconnected" -ForegroundColor Green
-    } catch {
-        Write-Host "✗ Failed: $_" -ForegroundColor Red
+        Write-Status -Type Success -Message "Session disconnected"
+    }
+    catch {
+        Write-Status -Type Error -Message "Failed" -Detail $_
     }
     Pause
 }
 
 function Set-RDMAParameters {
     $cluster = Get-ClusterName
-    
-    Write-Host "Configuring RDMA parameters on cluster: $cluster" -ForegroundColor Yellow
-    
-    Get-VMHost -Location $cluster | ForEach-Object {
-        $hostName = $_.Name
-        Write-Host "Configuring: $hostName" -ForegroundColor Cyan
+    if ($null -eq $cluster) {
+        Pause
+        return
+    }
+
+    Write-Status -Type Info -Message "Configuring RDMA parameters on cluster" -Detail $cluster
+
+    $hosts = @(Get-VMHost -Location $cluster)
+    $total = $hosts.Count
+    $current = 0
+    $successCount = 0
+    $failedItems = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        $hostName = $vmHost.Name
+        Show-BatchProgress -Operation "Configure RDMA" -Current $current -Total $total -CurrentItem $hostName
+
         try {
             $esxcli = Get-EsxCli -v2 -VMHost $hostName
-            $esxcli.system.module.parameters.set.invoke(@{module="nmlx5_core"; parameterstring="dcbx=1"})
-            $esxcli.system.module.parameters.set.invoke(@{module="nmlx5_core"; parameterstring="pfctx=8 pfcrx=8 trust_state=2 max_vfs=4"})
-            $esxcli.system.module.parameters.set.invoke(@{module="nmlx5_rdma"; parameterstring="pcp_force=3 dscp_force=26"})
-            Write-Host "  ✓ Parameters set" -ForegroundColor Green
-        } catch {
-            Write-Host "  ✗ Failed: $_" -ForegroundColor Red
+            $esxcli.system.module.parameters.set.invoke(@{module = "nmlx5_core"; parameterstring = "dcbx=1" })
+            $esxcli.system.module.parameters.set.invoke(@{module = "nmlx5_core"; parameterstring = "pfctx=8 pfcrx=8 trust_state=2 max_vfs=4" })
+            $esxcli.system.module.parameters.set.invoke(@{module = "nmlx5_rdma"; parameterstring = "pcp_force=3 dscp_force=26" })
+            $successCount++
+        }
+        catch {
+            $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
+
+    Write-Host ""  # Clear progress line
+    Show-BatchSummary -Operation "Configure RDMA Parameters" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
 function Get-DCBXStatus {
     $cluster = Get-ClusterName
-    $nicName = Read-Host "Enter NIC name (e.g., vmnic4)"
-    
-    Write-Host "Checking DCBX status on cluster: $cluster" -ForegroundColor Yellow
-    
-    Get-VMHost -Location $cluster | ForEach-Object {
-        $hostName = $_.Name
-        Write-Host "`n$hostName" -ForegroundColor Cyan
+    if ($null -eq $cluster) {
+        Pause
+        return
+    }
+
+    $nicName = Read-HostPrompt -Message "Enter NIC name (e.g., vmnic4)" -Default "vmnic4"
+
+    Write-Status -Type Info -Message "Checking DCBX status on cluster" -Detail $cluster
+
+    $hosts = @(Get-VMHost -Location $cluster)
+    $total = $hosts.Count
+    $current = 0
+    $successCount = 0
+    $failedItems = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        $hostName = $vmHost.Name
+        Write-Host ""
+        Write-Host "[$current/$total] $hostName" -ForegroundColor $script:Theme.Info
+
         try {
             $esxcli = Get-EsxCli -v2 -VMHost $hostName
-            $esxcli.network.nic.dcb.status.get.invoke(@{nicname=$nicName})
-        } catch {
-            Write-Host "  ✗ Failed: $_" -ForegroundColor Red
+            $esxcli.network.nic.dcb.status.get.invoke(@{nicname = $nicName })
+            $successCount++
+        }
+        catch {
+            Write-Status -Type Error -Message "Failed" -Detail $_
+            $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
+
+    Show-BatchSummary -Operation "Check DCBX Status" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
@@ -628,8 +1226,8 @@ function Get-ClusterIPMI {
     # Check connection type and handle accordingly
     if ($script:connectionType -eq "Standalone") {
         # Connected to standalone host - get IPMI for this host only
-        Write-Host "Retrieving IPMI BMC address for standalone host: $script:vCenterServer" -ForegroundColor Yellow
-        
+        Write-Status -Type Info -Message "Retrieving IPMI BMC address for standalone host" -Detail $script:vCenterServer
+
         try {
             # Get the connected host (when connected to standalone, there's only one)
             $hostObj = Get-VMHost -ErrorAction Stop | Select-Object -First 1
@@ -637,264 +1235,255 @@ function Get-ClusterIPMI {
                 # Fallback: try using the server name
                 $hostObj = Get-VMHost -Name $script:vCenterServer -ErrorAction Stop
             }
-            
+
             $esxcli = Get-EsxCli -v2 -VMHost $hostObj
             $bmcInfo = $esxcli.hardware.ipmi.bmc.get.Invoke()
-            $ipv4 = if ($bmcInfo.IPv4Address) { $bmcInfo.IPv4Address } 
-                   elseif ($bmcInfo.IP) { $bmcInfo.IP } 
-                   else { "N/A" }
-            
-            $results = [pscustomobject]@{
-                HostName    = $hostObj.Name
-                IPv4Address = $ipv4
-            }
-        } catch {
-            $results = [pscustomobject]@{
-                HostName    = $script:vCenterServer
-                IPv4Address = "Error: $_"
-            }
+            $ipv4 = if ($bmcInfo.IPv4Address) { $bmcInfo.IPv4Address }
+            elseif ($bmcInfo.IP) { $bmcInfo.IP }
+            else { "N/A" }
+
+            $results = @([pscustomobject]@{
+                    HostName    = $hostObj.Name
+                    IPv4Address = $ipv4
+                })
         }
-    } else {
+        catch {
+            $results = @([pscustomobject]@{
+                    HostName    = $script:vCenterServer
+                    IPv4Address = "Error: $_"
+                })
+        }
+    }
+    else {
         # Connected to vCenter - get IPMI for cluster hosts
         $cluster = Get-ClusterName
         if ($null -eq $cluster) {
             Pause
             return
         }
-        
-        Write-Host "Retrieving IPMI BMC addresses for cluster: $cluster" -ForegroundColor Yellow
-        
-        $results = Get-VMHost -Location $cluster | ForEach-Object {
+
+        Write-Status -Type Info -Message "Retrieving IPMI BMC addresses for cluster" -Detail $cluster
+
+        $hosts = @(Get-VMHost -Location $cluster)
+        $total = $hosts.Count
+        $current = 0
+        $results = @()
+
+        foreach ($vmHost in $hosts) {
+            $current++
+            Show-BatchProgress -Operation "Get IPMI" -Current $current -Total $total -CurrentItem $vmHost.Name
+
             try {
-                $esxcli = Get-EsxCli -v2 -VMHost $_.Name
+                $esxcli = Get-EsxCli -v2 -VMHost $vmHost.Name
                 $bmcInfo = $esxcli.hardware.ipmi.bmc.get.Invoke()
-                $ipv4 = if ($bmcInfo.IPv4Address) { $bmcInfo.IPv4Address } 
-                       elseif ($bmcInfo.IP) { $bmcInfo.IP } 
-                       else { "N/A" }
-                
-                [pscustomobject]@{
-                    HostName    = $_.Name
+                $ipv4 = if ($bmcInfo.IPv4Address) { $bmcInfo.IPv4Address }
+                elseif ($bmcInfo.IP) { $bmcInfo.IP }
+                else { "N/A" }
+
+                $results += [pscustomobject]@{
+                    HostName    = $vmHost.Name
                     IPv4Address = $ipv4
                 }
-            } catch {
-                [pscustomobject]@{
-                    HostName    = $_.Name
-                    IPv4Address = "Error: $_"
+            }
+            catch {
+                $results += [pscustomobject]@{
+                    HostName    = $vmHost.Name
+                    IPv4Address = "Error: $($_.Exception.Message)"
                 }
             }
         }
+        Write-Host ""  # Clear progress line
     }
-    
-    $results | Format-Table -AutoSize
+
+    # Display results in formatted table
+    Write-Host ""
+    Show-FormattedTable -Data $results -Columns @('HostName', 'IPv4Address') -ColumnWidths @{
+        HostName    = 30
+        IPv4Address = 20
+    }
     Pause
 }
 
 function Set-HostCustomAttribute {
-    $hostName = Read-Host "Enter ESXi hostname"
-    $ipAddress = Read-Host "Enter IP address"
-    $attrName = Read-Host "Enter custom attribute name [default: ManagementIP]"
-    
-    if ([string]::IsNullOrWhiteSpace($attrName)) {
-        $attrName = "ManagementIP"
+    $hostName = Read-HostPrompt -Message "Enter ESXi hostname"
+    if ([string]::IsNullOrWhiteSpace($hostName)) {
+        Write-Status -Type Error -Message "Hostname is required"
+        Pause
+        return
     }
-    
+
+    $ipAddress = Read-HostPrompt -Message "Enter IP address"
+    if ([string]::IsNullOrWhiteSpace($ipAddress)) {
+        Write-Status -Type Error -Message "IP address is required"
+        Pause
+        return
+    }
+
+    $attrName = Read-HostPrompt -Message "Enter custom attribute name" -Default "ManagementIP"
+
     try {
+        Write-Status -Type Processing -Message "Setting custom attribute on $hostName"
         $esxi = Get-VMHost -Name $hostName -ErrorAction Stop
-        
+
         # Create attribute if needed
         $attr = Get-CustomAttribute -Name $attrName -TargetType VMHost -ErrorAction SilentlyContinue
         if (-not $attr) {
             New-CustomAttribute -Name $attrName -TargetType VMHost -ErrorAction Stop | Out-Null
+            Write-Status -Type Info -Message "Created new custom attribute" -Detail $attrName
         }
-        
+
         Set-Annotation -Entity $esxi -CustomAttribute $attrName -Value $ipAddress -Confirm:$false
-        Write-Host "✓ Attribute set successfully" -ForegroundColor Green
-    } catch {
-        Write-Host "✗ Failed: $_" -ForegroundColor Red
+        Write-Status -Type Success -Message "Attribute set successfully" -Detail "$attrName = $ipAddress"
+    }
+    catch {
+        Write-Status -Type Error -Message "Failed" -Detail $_
     }
     Pause
 }
 
 function Set-ClusterCustomAttributeFromIPMI {
     $cluster = Get-ClusterName
-    $attrName = Read-Host "Enter custom attribute name [default: ManagementIP]"
-    
-    if ([string]::IsNullOrWhiteSpace($attrName)) {
-        $attrName = "ManagementIP"
-    }
-    
-    Write-Host "This will:" -ForegroundColor Yellow
-    Write-Host "  1. Get IPMI BMC addresses for all hosts in $cluster" -ForegroundColor Cyan
-    Write-Host "  2. Set '$attrName' custom attribute with IPMI IP for each host" -ForegroundColor Cyan
-    $confirm = Read-Host "Continue? (Y/N)"
-    
-    if ($confirm -ne "Y" -and $confirm -ne "y") {
-        Write-Host "Operation cancelled." -ForegroundColor Yellow
+    if ($null -eq $cluster) {
         Pause
         return
     }
-    
+
+    $attrName = Read-HostPrompt -Message "Enter custom attribute name" -Default "ManagementIP"
+
+    # Get host count for confirmation
+    $hosts = @(Get-VMHost -Location $cluster)
+    $hostCount = $hosts.Count
+
+    Write-Host ""
+    Write-Host "+---------------------------------------------------------------+" -ForegroundColor $script:Theme.Header
+    Write-Host "|  This operation will:" -ForegroundColor $script:Theme.Title
+    Write-Host "|    1. Get IPMI BMC addresses for all hosts in $cluster" -ForegroundColor $script:Theme.Info
+    Write-Host "|    2. Set '$attrName' custom attribute with IPMI IP" -ForegroundColor $script:Theme.Info
+    Write-Host "|  Affected hosts: $hostCount" -ForegroundColor $script:Theme.Info
+    Write-Host "+---------------------------------------------------------------+" -ForegroundColor $script:Theme.Header
+
+    $confirm = Read-HostPrompt -Message "Continue?" -Type YesNo -Default 'N'
+
+    if (-not $confirm) {
+        Write-Status -Type Warning -Message "Operation cancelled"
+        Pause
+        return
+    }
+
     # Get IPMI addresses
-    $ipmiData = Get-VMHost -Location $cluster | ForEach-Object {
+    Write-Status -Type Processing -Message "Retrieving IPMI addresses"
+    $total = $hosts.Count
+    $current = 0
+    $ipmiData = @()
+
+    foreach ($vmHost in $hosts) {
+        $current++
+        Show-BatchProgress -Operation "Get IPMI" -Current $current -Total $total -CurrentItem $vmHost.Name
+
         try {
-            $esxcli = Get-EsxCli -v2 -VMHost $_.Name
+            $esxcli = Get-EsxCli -v2 -VMHost $vmHost.Name
             $bmcInfo = $esxcli.hardware.ipmi.bmc.get.Invoke()
-            $ipv4 = if ($bmcInfo.IPv4Address) { $bmcInfo.IPv4Address } 
-                   elseif ($bmcInfo.IP) { $bmcInfo.IP } 
-                   else { $null }
-            
-            [pscustomobject]@{
-                Host = $_.Name
+            $ipv4 = if ($bmcInfo.IPv4Address) { $bmcInfo.IPv4Address }
+            elseif ($bmcInfo.IP) { $bmcInfo.IP }
+            else { $null }
+
+            $ipmiData += [pscustomobject]@{
+                Host = $vmHost.Name
                 IPMI = $ipv4
             }
-        } catch {
-            [pscustomobject]@{
-                Host = $_.Name
+        }
+        catch {
+            $ipmiData += [pscustomobject]@{
+                Host = $vmHost.Name
                 IPMI = $null
             }
         }
     }
-    
+
+    Write-Host ""  # Clear progress line
+
     # Create attribute if needed
     $attr = Get-CustomAttribute -Name $attrName -TargetType VMHost -ErrorAction SilentlyContinue
     if (-not $attr) {
         New-CustomAttribute -Name $attrName -TargetType VMHost -ErrorAction Stop | Out-Null
+        Write-Status -Type Info -Message "Created new custom attribute" -Detail $attrName
     }
-    
+
     # Set attributes
+    Write-Status -Type Processing -Message "Setting custom attributes"
+    $successCount = 0
+    $failedItems = @()
+
+    $current = 0
     foreach ($item in $ipmiData) {
+        $current++
+        Show-BatchProgress -Operation "Set Attribute" -Current $current -Total $total -CurrentItem $item.Host
+
         if ($item.IPMI) {
             try {
                 $esxi = Get-VMHost -Name $item.Host -ErrorAction Stop
                 Set-Annotation -Entity $esxi -CustomAttribute $attrName -Value $item.IPMI -Confirm:$false
-                Write-Host "✓ $($item.Host): $($item.IPMI)" -ForegroundColor Green
-            } catch {
-                Write-Host "✗ $($item.Host): Failed - $_" -ForegroundColor Red
+                $successCount++
             }
-        } else {
-            Write-Host "⚠ $($item.Host): No IPMI address found" -ForegroundColor Yellow
+            catch {
+                $failedItems += @{ Name = $item.Host; Error = $_.Exception.Message }
+            }
+        }
+        else {
+            $failedItems += @{ Name = $item.Host; Error = "No IPMI address found" }
         }
     }
+
+    Write-Host ""  # Clear progress line
+    Show-BatchSummary -Operation "Set Custom Attribute from IPMI" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
-function Pause {
-    Write-Host "`nPress any key to continue..." -ForegroundColor Gray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+# Helper function to check vCenter requirement
+function Test-VCenterRequired {
+    if ($script:connectionType -ne "vCenter") {
+        Write-Status -Type Error -Message "This option requires vCenter connection"
+        Pause
+        return $false
+    }
+    return $true
 }
 
 # Main loop
 do {
     Show-Menu
-    $choice = Read-Host "`nEnter your choice"
-    
+    $choice = Read-HostPrompt -Message "Enter your choice"
+
     switch ($choice) {
         "1" { Connect-ToVCenter }
         "2" { Disconnect-FromVCenter }
         "3" { Set-VCenterCredentials }
         "4" { Set-ESXiHostCredentials }
-        "5" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Start-ClusterSSH 
-            }
-        }
-        "6" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Stop-ClusterSSH 
-            }
-        }
-        "7" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Invoke-ESXCliOnCluster 
-            }
-        }
+        "5" { if (Test-VCenterRequired) { Start-ClusterSSH } }
+        "6" { if (Test-VCenterRequired) { Stop-ClusterSSH } }
+        "7" { if (Test-VCenterRequired) { Invoke-ESXCliOnCluster } }
         "8" { Invoke-ESXCliOnHost }
-        "9" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Restart-ClusterHosts 
-            }
-        }
+        "9" { if (Test-VCenterRequired) { Restart-ClusterHosts } }
         "10" { Copy-FileToHost }
-        "11" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Copy-FileToCluster 
-            }
-        }
+        "11" { if (Test-VCenterRequired) { Copy-FileToCluster } }
         "12" { Install-VIBOnHost }
-        "13" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Install-MellanoxDriver 
-            }
-        }
-        "14" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Invoke-SSHOnCluster 
-            }
-        }
+        "13" { if (Test-VCenterRequired) { Install-MellanoxDriver } }
+        "14" { if (Test-VCenterRequired) { Invoke-SSHOnCluster } }
         "15" { Show-SSHSessions }
         "16" { Remove-SSHSessionById }
-        "17" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Set-RDMAParameters 
-            }
-        }
-        "18" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Get-DCBXStatus 
-            }
-        }
+        "17" { if (Test-VCenterRequired) { Set-RDMAParameters } }
+        "18" { if (Test-VCenterRequired) { Get-DCBXStatus } }
         "19" { Get-ClusterIPMI }
-        "20" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Set-HostCustomAttribute 
-            }
-        }
-        "21" { 
-            if ($script:connectionType -ne "vCenter") {
-                Write-Host "This option is only available when connected to vCenter." -ForegroundColor Red
-                Pause
-            } else {
-                Set-ClusterCustomAttributeFromIPMI 
-            }
-        }
-        "0" { 
+        "20" { if (Test-VCenterRequired) { Set-HostCustomAttribute } }
+        "21" { if (Test-VCenterRequired) { Set-ClusterCustomAttributeFromIPMI } }
+        "0" {
             if ($script:connected) {
                 Disconnect-FromVCenter
             }
-            Write-Host "Exiting..." -ForegroundColor Yellow
+            Write-Status -Type Info -Message "Exiting..."
         }
-        default { 
-            Write-Host "Invalid choice. Please try again." -ForegroundColor Red
+        default {
+            Write-Status -Type Error -Message "Invalid choice" -Detail "Please enter a number 0-21"
             Pause
         }
     }
