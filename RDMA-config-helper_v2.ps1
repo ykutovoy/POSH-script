@@ -1565,6 +1565,7 @@ function Test-ConnectionRequired {
     return $true
 }
 
+function Test-VCenterRequired {
     if (-not $script:connected) {
         Write-Status -Type Error -Message "This option requires a connection" -Detail "Use option 1 to connect first"
         Pause
@@ -1576,6 +1577,7 @@ function Test-ConnectionRequired {
         return $false
     }
     return $true
+}
 }
 
 # Main loop
