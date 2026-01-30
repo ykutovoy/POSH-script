@@ -1556,7 +1556,15 @@ function Get-TargetHosts {
 }
 
 # Helper function to check vCenter requirement
-function Test-VCenterRequired {
+function Test-ConnectionRequired {
+    if (-not $script:connected) {
+        Write-Status -Type Error -Message "This option requires a connection" -Detail "Use option 1 to connect first"
+        Pause
+        return $false
+    }
+    return $true
+}
+
     if (-not $script:connected) {
         Write-Status -Type Error -Message "This option requires a connection" -Detail "Use option 1 to connect first"
         Pause
