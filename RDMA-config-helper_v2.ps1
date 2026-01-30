@@ -620,17 +620,23 @@ function Set-ESXiHostCredentials {
 }
 
 function Test-IsVCenter {
-    # Check if connected to vCenter or standalone host
-    if (-not $script:connected) {
-        return $false
-    }
-    
+    if (-not $script:connected) { return $false }
+
+    # Primary detection – try to get at least one cluster
     try {
-        # Try to get clusters - if we can get clusters, it's vCenter
         $clusters = Get-Cluster -ErrorAction SilentlyContinue
-        return ($null -ne $clusters -and $clusters.Count -gt 0)
+        if ($null -ne $clusters -and $clusters.Count -gt 0) {
+            return $true   # definitely a vCenter
+        }
     } catch {
-        # If Get-Cluster fails or returns nothing, it's likely a standalone host
+        # ignore – fall through to fallback detection
+    }
+
+    # Fallback detection – inspect the API type of the connected server
+    try {
+        $apiType = $global:DefaultVIServer.ExtensionData.Content.About.ApiType
+        return ($apiType -eq 'VirtualCenter')
+    } catch {
         return $false
     }
 }
@@ -652,6 +658,8 @@ function Get-ClusterName {
 }
 
 function Connect-ToVCenter {
+    # Reset cluster flag before attempting connection
+    $script:hasCluster = $false
     $vCenter = Get-VCenterName
     if ($null -eq $vCenter) {
         Pause
@@ -1181,7 +1189,31 @@ function Invoke-SSHOnCluster {
     Pause
 }
 
-function Show-SSHSessions {
+
+function Get-TargetHostsFromScope {
+    param([string]$OperationName)
+    $scope = Select-VCScope -OperationName $OperationName
+    switch ($scope) {
+        'host' {
+            $hostName = Read-HostPrompt -Message "Enter hostname"
+            $host = Get-VMHost -Name $hostName -ErrorAction SilentlyContinue
+            if ($null -eq $host) {
+                Write-Status -Type Error -Message "Host not found" -Detail $hostName
+                return @()
+            }
+            return @($host)
+        }
+        'cluster' {
+            $cluster = Get-ClusterName
+            if ($null -eq $cluster) { return @() }
+            return Get-VMHost -Location $cluster
+        }
+        'all' {
+            return Get-VMHost
+        }
+    }
+}
+
     Write-Status -Type Info -Message "Active SSH Sessions"
     $sessions = Get-SSHSession
     if ($sessions) {
@@ -1634,3 +1666,52 @@ do {
         }
     }
 } while ($choice -ne "0")
+
+# Helper: Prompt user to select scope for vCenter operations
+function Select-VCScope {
+    param([string]$OperationName)
+    $choices = @(
+        [pscustomobject]@{Label='Single host'; Value='host'}
+        [pscustomobject]@{Label='All hosts';   Value='all'}
+    )
+    if ($script:connectionType -eq 'vCenter') {
+        try {
+            $defaultCluster = Get-Cluster | Select-Object -First 1
+            if ($null -ne $defaultCluster) {
+                $choices += [pscustomobject]@{Label="Cluster ($($defaultCluster.Name))"; Value='cluster'}
+            }
+        } catch {}
+    }
+    Write-Host "Select scope for $OperationName:" -ForegroundColor $script:Theme.Title
+    for ($i=0;$i -lt $choices.Count;$i++) {
+        Write-Host "  $($i+1). $($choices[$i].Label)" -ForegroundColor $script:Theme.MenuOption
+    }
+    $selection = Read-HostPrompt -Message 'Enter choice' -Default '1'
+    $idx = [int]$selection - 1
+    return $choices[$idx].Value
+}
+
+# Helper: Return target hosts based on selected scope
+function Get-TargetHostsFromScope {
+    param([string]$OperationName)
+    $scope = Select-VCScope -OperationName $OperationName
+    switch ($scope) {
+        'host' {
+            $hostName = Read-HostPrompt -Message "Enter hostname"
+            $host = Get-VMHost -Name $hostName -ErrorAction SilentlyContinue
+            if ($null -eq $host) {
+                Write-Status -Type Error -Message "Host not found" -Detail $hostName
+                return @()
+            }
+            return @($host)
+        }
+        'cluster' {
+            $cluster = Get-ClusterName
+            if ($null -eq $cluster) { return @() }
+            return Get-VMHost -Location $cluster
+        }
+        'all' {
+            return Get-VMHost
+        }
+    }
+}
