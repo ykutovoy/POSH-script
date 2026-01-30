@@ -1578,7 +1578,6 @@ function Test-VCenterRequired {
     }
     return $true
 }
-}
 
 # Main loop
 do {
