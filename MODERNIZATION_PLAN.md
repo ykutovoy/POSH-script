@@ -166,6 +166,10 @@ This document outlines a plan to modernize the PowerShell scripts in this reposi
 
 ## Implementation Priority
 
+- Updated SSH menu options (5 & 6) to display dynamic descriptions based on connection type.
+
+## Implementation Priority
+
 ### ✅ Completed (Phase 1-5.1)
 - Phase 1: Authentication Fixes
 - Phase 2: Get-VMhostIpmi Integration

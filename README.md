@@ -82,6 +82,7 @@ The script presents an interactive menu:
   21. Set Custom Attribute on Cluster (from IPMI)
 
    0. Exit
+   # Note: Options 5 & 6 now adapt their description based on connection type (cluster vs host)
 +===============================================================+
 ```
 
