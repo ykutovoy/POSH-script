@@ -166,7 +166,7 @@ This document outlines a plan to modernize the PowerShell scripts in this reposi
 
 ## Implementation Priority
 
-- Updated SSH menu options (5 & 6) to display dynamic descriptions based on connection type.
+- Updated SSH options (5 & 6) to be available for both vCenter and standalone connections (enabled on any connected host).
 
 ## Implementation Priority
 

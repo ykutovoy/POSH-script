@@ -61,7 +61,7 @@ This document tracks the implementation status and changes made during the scrip
 - ✅ Added batch operation summaries showing total/success/failed counts
 - ✅ Added confirmation box for dangerous reboot operation
 - ✅ Updated IPMI results to use formatted table display
-- ✅ Dynamic SSH option descriptions: Options 5 \u0026 6 now display context‑aware descriptions based on connection type (cluster vs host)
+- ✅ SSH options 5 & 6 now enabled for both vCenter and standalone connections (use connection check only)
 - ✅ Get-TargetHosts helper: Introduced a new function to select scope (single host, cluster, all hosts) for SSH operations
 - ✅ Refactored `Start-ClusterSSH` and `Stop-ClusterSSH` to use `Get-TargetHosts`
 

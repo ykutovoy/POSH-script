@@ -453,8 +453,14 @@ function Show-Menu {
     # SSH Management section
     Write-Host ""
     Write-Host "-- SSH Management -------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "5" "Start SSH on cluster hosts" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
-    Write-MenuOption "6" "Stop SSH on cluster hosts" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
+    # Option 5 & 6: SSH management – description changes based on connection type
+    if ($script:connectionType -eq "vCenter") {
+        Write-MenuOption "5" "Start SSH (choose host/cluster/all)" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
+        Write-MenuOption "6" "Stop SSH (choose host/cluster/all)" -Enabled $isVCenter -DisabledReason $(if (-not $isConnected) { "Not connected" } else { "Requires vCenter" })
+    } else {
+        Write-MenuOption "5" "Start SSH on host" -Enabled $isConnected -DisabledReason $(if (-not $isConnected) { "Not connected" })
+        Write-MenuOption "6" "Stop SSH on host" -Enabled $isConnected -DisabledReason $(if (-not $isConnected) { "Not connected" })
+    }
 
     # ESXi CLI Operations section
     Write-Host ""
@@ -699,25 +705,17 @@ function Disconnect-FromVCenter {
 }
 
 function Start-ClusterSSH {
-    $cluster = Get-ClusterName
-    if ($null -eq $cluster) {
-        Pause
-        return
-    }
-
-    Write-Status -Type Info -Message "Starting SSH on hosts in cluster" -Detail $cluster
-
-    $hosts = @(Get-VMHost -Location $cluster)
-    $total = $hosts.Count
+    # Determine target hosts based on connection type and user scope
+    $targets = Get-TargetHosts
+    if ($targets.Count -eq 0) { Write-Status -Type Warning -Message "No hosts selected"; Pause; return }
+    $total = $targets.Count
     $current = 0
     $successCount = 0
     $failedItems = @()
-
-    foreach ($vmHost in $hosts) {
+    foreach ($vmHost in $targets) {
         $current++
         $hostName = $vmHost.Name
         Show-BatchProgress -Operation "Start SSH" -Current $current -Total $total -CurrentItem $hostName
-
         try {
             Get-VMHost -Name $hostName | Get-VMHostService |
                 Where-Object Key -EQ "TSM-SSH" | Start-VMHostService -Confirm:$false | Out-Null
@@ -727,32 +725,23 @@ function Start-ClusterSSH {
             $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
-
-    Write-Host ""  # Clear progress line
-    Show-BatchSummary -Operation "Start SSH on Cluster" -Total $total -SuccessCount $successCount -FailedItems $failedItems
+    Write-Host ""
+    Show-BatchSummary -Operation "Start SSH" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
 function Stop-ClusterSSH {
-    $cluster = Get-ClusterName
-    if ($null -eq $cluster) {
-        Pause
-        return
-    }
-
-    Write-Status -Type Info -Message "Stopping SSH on hosts in cluster" -Detail $cluster
-
-    $hosts = @(Get-VMHost -Location $cluster)
-    $total = $hosts.Count
+    # Determine target hosts based on connection type and user scope
+    $targets = Get-TargetHosts
+    if ($targets.Count -eq 0) { Write-Status -Type Warning -Message "No hosts selected"; Pause; return }
+    $total = $targets.Count
     $current = 0
     $successCount = 0
     $failedItems = @()
-
-    foreach ($vmHost in $hosts) {
+    foreach ($vmHost in $targets) {
         $current++
         $hostName = $vmHost.Name
         Show-BatchProgress -Operation "Stop SSH" -Current $current -Total $total -CurrentItem $hostName
-
         try {
             Get-VMHost -Name $hostName | Get-VMHostService |
                 Where-Object Key -EQ "TSM-SSH" | Stop-VMHostService -Confirm:$false | Out-Null
@@ -762,9 +751,8 @@ function Stop-ClusterSSH {
             $failedItems += @{ Name = $hostName; Error = $_.Exception.Message }
         }
     }
-
-    Write-Host ""  # Clear progress line
-    Show-BatchSummary -Operation "Stop SSH on Cluster" -Total $total -SuccessCount $successCount -FailedItems $failedItems
+    Write-Host ""
+    Show-BatchSummary -Operation "Stop SSH" -Total $total -SuccessCount $successCount -FailedItems $failedItems
     Pause
 }
 
@@ -1526,14 +1514,45 @@ function Set-ClusterCustomAttributeFromIPMI {
     Pause
 }
 
-# Helper function to check connection requirement
-function Test-ConnectionRequired {
-    if (-not $script:connected) {
-        Write-Status -Type Error -Message "This option requires a connection" -Detail "Use option 1 to connect first"
-        Pause
-        return $false
+function Get-TargetHosts {
+    <#
+    .SYNOPSIS
+        Returns an array of VMHost objects based on user-selected scope.
+    .DESCRIPTION
+        For vCenter connections, prompts the user to select a scope: single host, cluster, or all hosts.
+        For standalone connections, returns the single connected host.
+    #>
+    if ($script:connectionType -eq "Standalone") {
+        # Single host connection
+        $hostObj = Get-VMHost -ErrorAction SilentlyContinue | Select-Object -First 1
+        return @($hostObj)
     }
-    return $true
+    else {
+        # vCenter – ask for scope
+        Write-Host "Select SSH scope:" -ForegroundColor $script:Theme.Title
+        Write-Host "  1) Single host" -ForegroundColor $script:Theme.MenuOption
+        Write-Host "  2) Entire cluster" -ForegroundColor $script:Theme.MenuOption
+        Write-Host "  3) All hosts in vCenter" -ForegroundColor $script:Theme.MenuOption
+        $choice = Read-HostPrompt -Message "Enter choice (1-3)" -Default "2"
+        switch ($choice) {
+            "1" {
+                $hostName = Read-HostPrompt -Message "Enter hostname" -Default $script:vCenterServer
+                $host = Get-VMHost -Name $hostName -ErrorAction Stop
+                return @($host)
+            }
+            "2" {
+                $cluster = Get-ClusterName
+                if ($null -eq $cluster) { return @() }
+                $hosts = Get-VMHost -Location $cluster
+                return $hosts
+            }
+            "3" {
+                $hosts = Get-VMHost
+                return $hosts
+            }
+            default { return @() }
+        }
+    }
 }
 
 # Helper function to check vCenter requirement
@@ -1577,8 +1596,8 @@ do {
         }
         "3" { Set-VCenterCredentials }
         "4" { Set-ESXiHostCredentials }
-        "5" { if (Test-VCenterRequired) { Start-ClusterSSH } }
-        "6" { if (Test-VCenterRequired) { Stop-ClusterSSH } }
+        "5" { if (Test-ConnectionRequired) { Start-ClusterSSH } }
+        "6" { if (Test-ConnectionRequired) { Stop-ClusterSSH } }
         "7" { if (Test-VCenterRequired) { Invoke-ESXCliOnCluster } }
         "8" { if (Test-ConnectionRequired) { Invoke-ESXCliOnHost } }
         "9" { if (Test-VCenterRequired) { Restart-ClusterHosts } }
