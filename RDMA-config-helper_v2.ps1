@@ -355,28 +355,28 @@ function Show-SimplifiedScopeMenu {
     
     while ($true) {
         Clear-Host
-        Write-Host "=== Operation Scope Selection ===" -ForegroundColor $script:Theme.Cyan
-        Write-Host "Current Scope: $($script:OperationScope.Type) - $($script:OperationScope.Name)" -ForegroundColor $script:Theme.Yellow
-        Write-Host "Hosts in scope: $($script:OperationScope.Hosts.Count)" -ForegroundColor White
+        Write-Host "=== Operation Scope Selection ===" -ForegroundColor $script:Theme.Header
+        Write-Host "Current Scope: $($script:OperationScope.Type) - $($script:OperationScope.Name)" -ForegroundColor $script:Theme.Title
+        Write-Host "Hosts in scope: $($script:OperationScope.Hosts.Count)" -ForegroundColor $script:Theme.MenuOption
         
-        Write-Host "`nAvailable scope types:" -ForegroundColor White
+        Write-Host "`nAvailable scope types:" -ForegroundColor $script:Theme.MenuOption
         
         if ($script:connectionType -eq "vCenter") {
             # Connected to vCenter
             $clusters = Get-Cluster | Sort-Object Name -ErrorAction SilentlyContinue
             
             if ($clusters -and $clusters.Count -gt 0) {
-                Write-Host "1. Select Cluster" -ForegroundColor Green
+                Write-Host "1. Select Cluster" -ForegroundColor $script:Theme.Success
             } else {
-                Write-Host "1. Select Cluster [No clusters available]" -ForegroundColor DarkGray
+                Write-Host "1. Select Cluster [No clusters available]" -ForegroundColor $script:Theme.Disabled
             }
             
-            Write-Host "2. All Hosts in vCenter" -ForegroundColor Green
-            Write-Host "3. Single Host" -ForegroundColor Green
+            Write-Host "2. All Hosts in vCenter" -ForegroundColor $script:Theme.Success
+            Write-Host "3. Single Host" -ForegroundColor $script:Theme.Success
             
         } elseif ($script:connectionType -eq "Standalone") {
             # Connected to standalone ESXi
-            Write-Host "1. Current Host (standalone)" -ForegroundColor Green
+            Write-Host "1. Current Host (standalone)" -ForegroundColor $script:Theme.Success
         }
         
         Write-Host "`n0. Cancel"
@@ -430,16 +430,16 @@ function ProcessSimplifiedScopeSelection {
             }
             
             Clear-Host
-            Write-Host "=== Select Cluster ===" -ForegroundColor $script:Theme.Cyan
-            Write-Host "Available clusters:" -ForegroundColor White
+            Write-Host "=== Select Cluster ===" -ForegroundColor $script:Theme.Header
+            Write-Host "Available clusters:" -ForegroundColor $script:Theme.MenuOption
             
             for ($i = 0; $i -lt $clusters.Count; $i++) {
                 $hostCount = ($clusters[$i] | Get-VMHost -ErrorAction SilentlyContinue).Count
                 $connectionStates = ($clusters[$i] | Get-VMHost -ErrorAction SilentlyContinue | Group-Object ConnectionState | 
                     ForEach-Object { "$($_.Name):$($_.Count)" }) -join ", "
                 
-                Write-Host "$($i+1). $($clusters[$i].Name)" -ForegroundColor White
-                Write-Host "    Hosts: $hostCount | $connectionStates" -ForegroundColor Gray
+                Write-Host "$($i+1). $($clusters[$i].Name)" -ForegroundColor $script:Theme.MenuOption
+                Write-Host "    Hosts: $hostCount | $connectionStates" -ForegroundColor $script:Theme.Disabled
             }
             
             Write-Host "`nC. Cancel"
@@ -531,7 +531,7 @@ function ProcessSimplifiedScopeSelection {
             }
             
             Clear-Host
-            Write-Host "=== Select Single Host ===" -ForegroundColor $script:Theme.Cyan
+            Write-Host "=== Select Single Host ===" -ForegroundColor $script:Theme.Header
             
             # Show hosts in pages of 20
             $pageSize = 20
@@ -542,21 +542,21 @@ function ProcessSimplifiedScopeSelection {
                 $startIndex = ($currentPage - 1) * $pageSize
                 $endIndex = [math]::Min($startIndex + $pageSize - 1, $allHosts.Count - 1)
                 
-                Write-Host "`nHosts $($startIndex+1)-$($endIndex+1) of $($allHosts.Count):" -ForegroundColor White
+                Write-Host "`nHosts $($startIndex+1)-$($endIndex+1) of $($allHosts.Count):" -ForegroundColor $script:Theme.MenuOption
                 
                 for ($i = $startIndex; $i -le $endIndex; $i++) {
                     $hostNum = $i + 1
                     $hostName = $allHosts[$i].Name
                     $status = $allHosts[$i].ConnectionState
-                    $color = if ($status -eq "Connected") { "Green" } else { "Red" }
+                    $color = if ($status -eq "Connected") { $script:Theme.Success } else { $script:Theme.Error }
                     
                     Write-Host "$hostNum. $hostName" -ForegroundColor $color
                 }
                 
-                Write-Host "`nCommands:" -ForegroundColor Cyan
-                if ($currentPage -gt 1) { Write-Host "  P - Previous page" }
-                if ($currentPage -lt $totalPages) { Write-Host "  N - Next page" }
-                Write-Host "  C - Cancel"
+                Write-Host "`nCommands:" -ForegroundColor $script:Theme.Info
+                if ($currentPage -gt 1) { Write-Host "  P - Previous page" -ForegroundColor $script:Theme.MenuOption }
+                if ($currentPage -lt $totalPages) { Write-Host "  N - Next page" -ForegroundColor $script:Theme.MenuOption }
+                Write-Host "  C - Cancel" -ForegroundColor $script:Theme.MenuOption
                 
                 $input = Read-Host "`nSelect host number or command"
                 
@@ -706,9 +706,9 @@ function Invoke-ScopedOperation {
     # Confirmation for potentially dangerous operations
     if ($ConfirmOperation) {
         Write-Host ""
-        Write-Host "Operation: $OperationName" -ForegroundColor Cyan
-        Write-Host "Scope: $($script:OperationScope.Type) - $($script:OperationScope.Name)" -ForegroundColor White
-        Write-Host "Hosts: $($script:OperationScope.Hosts.Count)" -ForegroundColor White
+        Write-Host "Operation: $OperationName" -ForegroundColor $script:Theme.Header
+        Write-Host "Scope: $($script:OperationScope.Type) - $($script:OperationScope.Name)" -ForegroundColor $script:Theme.MenuOption
+        Write-Host "Hosts: $($script:OperationScope.Hosts.Count)" -ForegroundColor $script:Theme.MenuOption
         
         $confirm = Read-HostPrompt -Message "`nConfirm execution?" -Type YesNo -Default 'Y'
         if ($confirm -ne "Y") {
@@ -904,14 +904,14 @@ function Show-Menu {
     # Scope information
     Write-Host "|  Scope: " -NoNewline -ForegroundColor $script:Theme.Header
     if ($scopeValid) {
-        $scopeColor = if ($script:OperationScope.Type -eq "Cluster") { "Green" } else { "Cyan" }
+        $scopeColor = if ($script:OperationScope.Type -eq "Cluster") { $script:Theme.Success } else { $script:Theme.Info }
         Write-Host "$($script:OperationScope.Type): $($script:OperationScope.Name)" -ForegroundColor $scopeColor
-        Write-Host "|          Hosts: $($script:OperationScope.Hosts.Count)" -ForegroundColor White
+        Write-Host "|          Hosts: $($script:OperationScope.Hosts.Count)" -ForegroundColor $script:Theme.MenuOption
         
         # Show connection status
         $connectedCount = ($script:OperationScope.Hosts | Where-Object { $_.ConnectionState -eq "Connected" }).Count
         if ($connectedCount -lt $script:OperationScope.Hosts.Count) {
-            Write-Host "|          Status: $connectedCount/$($script:OperationScope.Hosts.Count) connected" -ForegroundColor Yellow
+            Write-Host "|          Status: $connectedCount/$($script:OperationScope.Hosts.Count) connected" -ForegroundColor $script:Theme.Warning
         }
     } else {
         Write-Host "Not set (use option 5)" -ForegroundColor $script:Theme.Warning
@@ -960,65 +960,65 @@ function Show-Menu {
     }
 
     Write-Host "+---------------------------------------------------------------+" -ForegroundColor $script:Theme.Header
-    Write-Host "|  Operations 6-21 use current scope: $($script:OperationScope.Type)" -ForegroundColor Magenta
+    Write-Host "|  Operations 6-21 use current scope: $($script:OperationScope.Type)" -ForegroundColor $script:Theme.Info
     Write-Host "+---------------------------------------------------------------+`r" -ForegroundColor $script:Theme.Header
 
     # Connection section
     Write-Host ""
     Write-Host "-- Connection -----------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "1" "Connect to vCenter"
-    Write-MenuOption "2" "Connect to standalone ESXi host"
-    Write-MenuOption "3" "Disconnect" -Enabled $isConnected -DisabledReason "Not connected"
-    Write-MenuOption "4" "Set/Reset Credentials"
+    Write-MenuOption "1" "Connect to vCenter/ESXi"
+    Write-MenuOption "2" "Disconnect" -Enabled $isConnected -DisabledReason "Not connected"
+    Write-MenuOption "3" "Set/Reset Credentials"
 
     # Scope section
     Write-Host ""
     Write-Host "-- Scope Management -----------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "5" "Set Operation Scope [Current: $($script:OperationScope.Type)]" -Enabled $isConnected -DisabledReason "Not connected"
+    Write-MenuOption "4" "Set Operation Scope [Current: $($script:OperationScope.Type)]" -Enabled $isConnected -DisabledReason "Not connected"
 
     # SSH Management
     Write-Host ""
     Write-Host "-- SSH Management -------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "6" "Start SSH on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
-    Write-MenuOption "7" "Stop SSH on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
+    Write-MenuOption "5" "Start SSH on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
+    Write-MenuOption "6" "Stop SSH on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
 
     # ESXi CLI Operations
     Write-Host ""
     Write-Host "-- ESXi CLI Operations --------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "8" "Run ESXCLI command on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
-    Write-MenuOption "9" "Reboot scope hosts (with confirmation)" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
-    Write-MenuOption "10" "Run ESXCLI command on single host (prompts for host)" -Enabled $isConnected -DisabledReason "Not connected"
+    Write-MenuOption "7" "Run ESXCLI command on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
+    Write-MenuOption "8" "Reboot scope hosts (with confirmation)" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
+    Write-MenuOption "9" "Run ESXCLI command on single host (prompts for host)" -Enabled $isConnected -DisabledReason "Not connected"
 
     # File Transfer
     Write-Host ""
     Write-Host "-- File Transfer --------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "11" "SCP file to single host (prompts for host)" -Enabled $isConnected -DisabledReason "Not connected"
-    Write-MenuOption "12" "SCP file to scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
+    Write-MenuOption "10" "SCP file to single host (prompts for host)" -Enabled $isConnected -DisabledReason "Not connected"
+    Write-MenuOption "11" "SCP file to scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
 
     # Driver/VIB Management
     Write-Host ""
     Write-Host "-- Driver/VIB Management ------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "13" "Install VIB on single host" -Enabled $isConnected -DisabledReason "Not connected"
-    Write-MenuOption "14" "Install Mellanox driver on scope hosts" -Enabled $scopeForClusterOps -DisabledReason $(if (-not $scopeForClusterOps) { "Cluster/vCenterAll scope required" })
+    Write-MenuOption "12" "Install VIB on single host" -Enabled $isConnected -DisabledReason "Not connected"
+    Write-MenuOption "13" "Install Mellanox driver on scope hosts" -Enabled $scopeForClusterOps -DisabledReason $(if (-not $scopeForClusterOps) { "Cluster/vCenterAll scope required" })
 
     # SSH Commands
     Write-Host ""
     Write-Host "-- SSH Commands ---------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "15" "Execute SSH command on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
-    Write-MenuOption "16" "View active SSH sessions"
-    Write-MenuOption "17" "Disconnect SSH session"
+    Write-MenuOption "14" "Execute SSH command on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
+    Write-MenuOption "15" "View active SSH sessions"
+    Write-MenuOption "16" "Disconnect SSH session"
 
     # RDMA/Network
     Write-Host ""
     Write-Host "-- RDMA/Network ---------------------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "18" "Configure RDMA parameters on scope hosts" -Enabled $scopeForClusterOps -DisabledReason $(if (-not $scopeForClusterOps) { "Cluster/vCenterAll scope required" })
-    Write-MenuOption "19" "Check DCBX status on scope hosts" -Enabled $scopeForClusterOps -DisabledReason $(if (-not $scopeForClusterOps) { "Cluster/vCenterAll scope required" })
+    Write-MenuOption "17" "Configure RDMA parameters on scope hosts" -Enabled $scopeForClusterOps -DisabledReason $(if (-not $scopeForClusterOps) { "Cluster/vCenterAll scope required" })
+    Write-MenuOption "18" "Check DCBX status on scope hosts" -Enabled $scopeForClusterOps -DisabledReason $(if (-not $scopeForClusterOps) { "Cluster/vCenterAll scope required" })
 
     # IPMI/Custom Attributes
     Write-Host ""
     Write-Host "-- IPMI/Custom Attributes -----------------------------------------" -ForegroundColor $script:Theme.Title
-    Write-MenuOption "20" "Get IPMI BMC Addresses from scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
-    Write-MenuOption "21" "Set Custom Attribute on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
+    Write-MenuOption "19" "Get IPMI BMC Addresses from scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
+    Write-MenuOption "20" "Set Custom Attribute on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
+    Write-MenuOption "21" "Set Custom Attribute from IPMI on scope hosts" -Enabled $scopeValid -DisabledReason $(if (-not $scopeValid) { "Set scope first" })
 
     # Exit
     Write-Host ""
@@ -1667,9 +1667,9 @@ function Invoke-SSHOnCluster {
     
     foreach ($result in $operationResults) {
         Write-Host ""
-        Write-Host "Host: $($result.Host)" -ForegroundColor Cyan
+        Write-Host "Host: $($result.Host)" -ForegroundColor $script:Theme.Info
         if ($result.Success) {
-            Write-Host "Output:" -ForegroundColor Green
+            Write-Host "Output:" -ForegroundColor $script:Theme.Success
             Write-Host $result.Result
         } else {
             Write-Status -Type Error -Message "Failed" -Detail $result.Error
@@ -1750,9 +1750,9 @@ function Get-DCBXStatus {
     
     foreach ($result in $operationResults) {
         Write-Host ""
-        Write-Host "Host: $($result.Host)" -ForegroundColor Cyan
+        Write-Host "Host: $($result.Host)" -ForegroundColor $script:Theme.Info
         if ($result.Success) {
-            Write-Host "Status:" -ForegroundColor Green
+            Write-Host "Status:" -ForegroundColor $script:Theme.Success
             Write-Host $result.Result
         } else {
             Write-Status -Type Error -Message "Failed" -Detail $result.Error
@@ -1795,19 +1795,11 @@ function Get-ClusterIPMI {
 }
 
 function Set-HostCustomAttribute {
-    $operationResults = Invoke-ScopedOperation -Operation {
-        param($TargetHost)
-        
-        # For this operation, we need to prompt for attribute values per scope
-        # Since we can't prompt inside the scoped operation, we'll use a different approach
-        
-    } -OperationName "Set Custom Attribute" -AllowedScopeTypes @("Cluster", "vCenterAll", "Host") -ConfirmOperation:$false
-    
     # Since we need to prompt for values, handle this differently
     Write-Host ""
-    Write-Host "Set Custom Attribute for current scope" -ForegroundColor Cyan
-    Write-Host "Scope: $($script:OperationScope.Type) - $($script:OperationScope.Name)" -ForegroundColor White
-    Write-Host "Hosts: $($script:OperationScope.Hosts.Count)" -ForegroundColor White
+    Write-Host "Set Custom Attribute for current scope" -ForegroundColor $script:Theme.Header
+    Write-Host "Scope: $($script:OperationScope.Type) - $($script:OperationScope.Name)" -ForegroundColor $script:Theme.MenuOption
+    Write-Host "Hosts: $($script:OperationScope.Hosts.Count)" -ForegroundColor $script:Theme.MenuOption
     
     $attrName = Read-HostPrompt -Message "Enter custom attribute name" -Default "ManagementIP"
     $attrValue = Read-HostPrompt -Message "Enter attribute value"
@@ -1866,9 +1858,9 @@ function Set-HostCustomAttribute {
 
 function Set-ClusterCustomAttributeFromIPMI {
     Write-Host ""
-    Write-Host "Set Custom Attribute from IPMI for current scope" -ForegroundColor Cyan
-    Write-Host "Scope: $($script:OperationScope.Type) - $($script:OperationScope.Name)" -ForegroundColor White
-    Write-Host "Hosts: $($script:OperationScope.Hosts.Count)" -ForegroundColor White
+    Write-Host "Set Custom Attribute from IPMI for current scope" -ForegroundColor $script:Theme.Header
+    Write-Host "Scope: $($script:OperationScope.Type) - $($script:OperationScope.Name)" -ForegroundColor $script:Theme.MenuOption
+    Write-Host "Hosts: $($script:OperationScope.Hosts.Count)" -ForegroundColor $script:Theme.MenuOption
     
     $attrName = Read-HostPrompt -Message "Enter custom attribute name" -Default "ManagementIP"
     
@@ -1998,7 +1990,7 @@ do {
     switch ($choice) {
         "1" {
             if ($script:connected) {
-                Write-Status -Type Warning -Message "Already connected" -Detail "Use option 3 to disconnect first"
+                Write-Status -Type Warning -Message "Already connected" -Detail "Use option 2 to disconnect first"
                 Pause
             }
             else {
@@ -2006,15 +1998,6 @@ do {
             }
         }
         "2" {
-            if ($script:connected) {
-                Write-Status -Type Warning -Message "Already connected" -Detail "Use option 3 to disconnect first"
-                Pause
-            }
-            else {
-                Connect-And-SetDefaultScope
-            }
-        }
-        "3" {
             if (-not $script:connected) {
                 Write-Status -Type Warning -Message "Not connected" -Detail "Nothing to disconnect"
                 Pause
@@ -2023,31 +2006,31 @@ do {
                 Disconnect-FromVCenter
             }
         }
-        "4" { 
+        "3" { 
             if ($script:connected -and $script:connectionType -eq "vCenter") {
                 Set-VCenterCredentials 
             } else {
                 Set-ESXiHostCredentials
             }
         }
-        "5" { if (Test-ConnectionRequired) { Show-SimplifiedScopeMenu } }
-        "6" { if (Test-ConnectionRequired) { Start-ClusterSSH } }
-        "7" { if (Test-ConnectionRequired) { Stop-ClusterSSH } }
-        "8" { if (Test-ConnectionRequired) { Invoke-ESXCliOnCluster } }
-        "9" { if (Test-ConnectionRequired) { Invoke-ESXCliOnHost } }
-        "10" { if (Test-ConnectionRequired) { Restart-ClusterHosts } }
-        "11" { if (Test-ConnectionRequired) { Copy-FileToHost } }
-        "12" { if (Test-ConnectionRequired) { Copy-FileToCluster } }
-        "13" { if (Test-ConnectionRequired) { Install-VIBOnHost } }
-        "14" { if (Test-ConnectionRequired) { Install-MellanoxDriver } }
-        "15" { if (Test-ConnectionRequired) { Invoke-SSHOnCluster } }
-        "16" { Show-SSHSessions }
-        "17" { Remove-SSHSessionById }
-        "18" { if (Test-ConnectionRequired) { Set-RDMAParameters } }
-        "19" { if (Test-ConnectionRequired) { Get-DCBXStatus } }
-        "20" { if (Test-ConnectionRequired) { Get-ClusterIPMI } }
-        "21" { if (Test-ConnectionRequired) { Set-HostCustomAttribute } }
-        "22" { if (Test-ConnectionRequired) { Set-ClusterCustomAttributeFromIPMI } }
+        "4" { if (Test-ConnectionRequired) { Show-SimplifiedScopeMenu } }
+        "5" { if (Test-ConnectionRequired) { Start-ClusterSSH } }
+        "6" { if (Test-ConnectionRequired) { Stop-ClusterSSH } }
+        "7" { if (Test-ConnectionRequired) { Invoke-ESXCliOnCluster } }
+        "8" { if (Test-ConnectionRequired) { Invoke-ESXCliOnHost } }
+        "9" { if (Test-ConnectionRequired) { Restart-ClusterHosts } }
+        "10" { if (Test-ConnectionRequired) { Copy-FileToHost } }
+        "11" { if (Test-ConnectionRequired) { Copy-FileToCluster } }
+        "12" { if (Test-ConnectionRequired) { Install-VIBOnHost } }
+        "13" { if (Test-ConnectionRequired) { Install-MellanoxDriver } }
+        "14" { if (Test-ConnectionRequired) { Invoke-SSHOnCluster } }
+        "15" { Show-SSHSessions }
+        "16" { Remove-SSHSessionById }
+        "17" { if (Test-ConnectionRequired) { Set-RDMAParameters } }
+        "18" { if (Test-ConnectionRequired) { Get-DCBXStatus } }
+        "19" { if (Test-ConnectionRequired) { Get-ClusterIPMI } }
+        "20" { if (Test-ConnectionRequired) { Set-HostCustomAttribute } }
+        "21" { if (Test-ConnectionRequired) { Set-ClusterCustomAttributeFromIPMI } }
         "0" {
             if ($script:connected) {
                 Disconnect-FromVCenter
