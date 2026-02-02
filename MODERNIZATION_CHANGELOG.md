@@ -313,6 +313,55 @@ SECURITY_AUDIT_REPORT.md        # Security notes
 - ✅ Verified IPMI results display in formatted table
 - ✅ Verified "Last Operation" display updates after batch operations
 
+### Phase 6.1: Architecture Redesign - COMPLETED
+- **Simplified Scope System**: Implemented unified scope types: 'Host', 'Cluster', 'vCenterAll'
+- **Unified Operation Framework**: Created `Invoke-ScopedOperation` for all batch operations
+- **Removed Cluster Dependency**: Operations now work with any scope type, not just clusters
+- **Unified Connection Interface**: Consolidated vCenter and standalone ESXi connection into single option
+- **Smart Scope Auto-detection**: Automatically sets appropriate scope on connection
+- **Dynamic Menu Availability**: Options enabled/disabled based on scope and connection type
+- **Menu Consolidation**: Reduced from 22 to 21 options by removing redundant connection option
+- **Scope-aware Display**: Menu header shows current scope type, name, and host count
+- **Theme Color Fixes**: Corrected `$script:Theme.Cyan/Yellow` references to proper theme keys
+
+**New Core Components:**
+- `$script:OperationScope` - Tracks current scope (Type, Name, Hosts, Cluster)
+- `Invoke-ScopedOperation` - Unified batch execution with progress and error handling
+- `Show-SimplifiedScopeMenu` - Interactive scope selection (Host/Cluster/All)
+- `Test-CurrentScope` - Validates scope before operations
+- `Get-TargetHostsFromScope` - Returns hosts based on current scope
+
+**Menu Restructure:**
+1. Connect to vCenter/ESXi (unified)
+2. Disconnect
+3. Set/Reset Credentials (context-aware)
+4. Set Operation Scope (Host/Cluster/vCenterAll)
+5. Start SSH on scope hosts
+6. Stop SSH on scope hosts
+7. Run ESXCLI command on scope
+8. Reboot scope hosts
+9. Run ESXCLI on single host
+10. SCP file to single host
+11. SCP file to scope hosts
+12. Install VIB on single host
+13. Install Mellanox driver
+14. Execute SSH command on scope
+15. View active SSH sessions
+16. Disconnect SSH session
+17. Configure RDMA parameters
+18. Check DCBX status
+19. Get IPMI BMC Addresses
+20. Set Custom Attribute
+21. Set Custom Attribute from IPMI
+0. Exit
+
+**Technical Improvements:**
+- ✅ Core scope system implemented and working
+- ✅ All operations converted to scope-aware execution
+- ✅ Menu structure finalized and tested
+- ✅ Connection system streamlined
+- ✅ Theme-consistent UI throughout
+- ✅ Better error messages and scope validation
 ---
 
 ## Known Issues
