@@ -45,13 +45,10 @@ The script presents an interactive menu:
 
 -- Connection & Scope --------------------------------------------
 
-Connect to vCenter/ESXi
-
-Disconnect
-
-Set/Reset Credentials
-
-Set Operation Scope (Host/Cluster/All)
+1. Connect to vCenter/ESXi
+2. Disconnect
+3. Set/Reset Credentials
+4. Set Operation Scope (Host/Cluster/All)
 
 -- SSH Management ------------------------------------------------
 5. Start SSH on scope hosts
