@@ -36,53 +36,55 @@ The script presents an interactive menu:
 
 ```
 +===============================================================+
-|           ESXi Cluster Management Tool v2.0                   |
+| ESXi Cluster Management Tool v2.1 |
 +===============================================================+
-|  Status: Connected to vCenter: vcenter.example.com            |
-|  Cluster: Production-Cluster-01                               |
-|  vCenter Creds: Cached (administrator@vsphere.local)          |
-|  ESXi Host Creds: Cached (root)                               |
+| Status: Connected to vCenter: vcenter.example.com |
+| Scope: Cluster "Production-Cluster-01" (8 hosts) |
+| Credentials: Cached (administrator@vsphere.local / root) |
 +---------------------------------------------------------------+
 
--- Connection -----------------------------------------------------
-   1. Connect to vCenter/ESXi
-   2. Disconnect
-   3. Set/Reset vCenter Credentials
-   4. Set/Reset ESXi Host Credentials
+-- Connection & Scope --------------------------------------------
 
--- SSH Management -------------------------------------------------
-   5. Start SSH on cluster hosts
-   6. Stop SSH on cluster hosts
+Connect to vCenter/ESXi
 
--- ESXi CLI Operations --------------------------------------------
-   7. Run ESXCli command on all hosts
-   8. Run ESXCli command on single host
-   9. Reboot all hosts in cluster
+Disconnect
 
--- File Transfer --------------------------------------------------
-  10. SCP file to single host
-  11. SCP file to all hosts in cluster
+Set/Reset Credentials
 
--- Driver/VIB Management ------------------------------------------
-  12. Install VIB on single host
-  13. Install Mellanox driver on cluster
+Set Operation Scope (Host/Cluster/All)
 
--- SSH Commands ---------------------------------------------------
-  14. Execute SSH command on cluster hosts
-  15. View active SSH sessions
-  16. Disconnect SSH session
+-- SSH Management ------------------------------------------------
+5. Start SSH on scope hosts
+6. Stop SSH on scope hosts
 
--- RDMA/Network ---------------------------------------------------
-  17. Configure RDMA parameters
-  18. Check DCBX status
+-- ESXi CLI Operations -------------------------------------------
+7. Run ESXCLI command on scope
+8. Reboot scope hosts
+9. Run ESXCLI on single host
 
--- IPMI/Custom Attributes -----------------------------------------
-  19. Get IPMI BMC Addresses
-  20. Set Custom Attribute on Host
-  21. Set Custom Attribute on Cluster (from IPMI)
+-- File Transfer -------------------------------------------------
+10. SCP file to single host
+11. SCP file to scope hosts
 
-   0. Exit
-   # Note: Options 5 & 6 now adapt their description based on connection type (cluster vs host)
+-- Driver/VIB Management -----------------------------------------
+12. Install VIB on single host
+13. Install Mellanox driver
+
+-- SSH Commands --------------------------------------------------
+14. Execute SSH command on scope
+15. View active SSH sessions
+16. Disconnect SSH session
+
+-- RDMA/Network --------------------------------------------------
+17. Configure RDMA parameters
+18. Check DCBX status
+
+-- IPMI/Custom Attributes ----------------------------------------
+19. Get IPMI BMC Addresses
+20. Set Custom Attribute
+21. Set Custom Attribute from IPMI
+
+Exit
 +===============================================================+
 ```
 
